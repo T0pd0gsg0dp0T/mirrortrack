@@ -383,11 +383,17 @@ class InsightsViewModel @Inject constructor(
         val dataPoints = dao.countSince(todayStart)
 
         val screenEvents = dao.byCollectorKeySince("screen_state", "event", todayStart)
-        val unlocks = screenEvents.count { it.value == "screen_on" }
 
-        // Screen time: pair on/off events
-        val sorted = screenEvents.sortedBy { it.timestamp }
+        // Unlocks: primary screen_state, fallback app_lifecycle foreground events
+        var unlocks = screenEvents.count { it.value == "screen_on" }
+        if (unlocks == 0) {
+            val lifecycleEvents = dao.byCollectorKeySince("app_lifecycle", "app_foreground", todayStart)
+            unlocks = lifecycleEvents.size
+        }
+
+        // Screen time: primary screen_state on/off pairs
         var screenTimeMs = 0L
+        val sorted = screenEvents.sortedBy { it.timestamp }
         var lastOnTime: Long? = null
         for (e in sorted) {
             when (e.value) {
@@ -400,18 +406,36 @@ class InsightsViewModel @Inject constructor(
                 }
             }
         }
-        // If screen is currently on, count up to now
         if (lastOnTime != null) {
             screenTimeMs += System.currentTimeMillis() - lastOnTime
         }
+        // Fallback: app_lifecycle duration_ms entries
+        if (screenTimeMs == 0L) {
+            val durations = dao.byCollectorKeySince("app_lifecycle", "duration_ms", todayStart)
+            screenTimeMs = durations.mapNotNull { it.value.toLongOrNull() }.sum()
+        }
+        // Fallback 2: usage_stats total foreground
+        if (screenTimeMs == 0L) {
+            val usageData = dao.byCollectorSince("usage_stats", todayStart)
+                .filter { it.key.startsWith("package_usage:") }
+            screenTimeMs = usageData.mapNotNull { parseForegroundMs(it.value) }.maxOrNull() ?: 0L
+        }
 
+        // Steps: primary steps collector, fallback motion_sensor step_counter
         val stepEvents = dao.byCollectorKeySince("steps", "step_counter_delta", todayStart)
-        val steps = stepEvents.mapNotNull { it.value.toLongOrNull() }.sum()
+        var steps = stepEvents.mapNotNull { it.value.toLongOrNull() }.sum()
+        if (steps == 0L) {
+            val motionSteps = dao.byCollectorKeySince("motion_sensor", "step_counter", todayStart)
+            if (motionSteps.size >= 2) {
+                val first = motionSteps.minByOrNull { it.timestamp }?.value?.toLongOrNull() ?: 0L
+                val last = motionSteps.maxByOrNull { it.timestamp }?.value?.toLongOrNull() ?: 0L
+                steps = (last - first).coerceAtLeast(0)
+            }
+        }
 
         val batteryToday = dao.byCollectorKeySince("battery", "level", todayStart)
             .mapNotNull { it.value.toIntOrNull() }
         val batteryDelta = if (batteryToday.size >= 2) {
-            // first reading minus last reading (positive = drain)
             batteryToday.last() - batteryToday.first()
         } else 0
 
@@ -433,8 +457,23 @@ class InsightsViewModel @Inject constructor(
         val ninetyDaysAgo = LocalDate.now().minusDays(90)
             .atStartOfDay(zone).toInstant().toEpochMilli()
 
-        val events = dao.byCollectorKeySince("screen_state", "event", ninetyDaysAgo)
+        var events = dao.byCollectorKeySince("screen_state", "event", ninetyDaysAgo)
             .sortedBy { it.timestamp }
+
+        // Fallback: synthesize screen-like events from app_lifecycle
+        if (events.size < 10) {
+            val lifecycle = dao.byCollectorSince("app_lifecycle", ninetyDaysAgo)
+                .sortedBy { it.timestamp }
+            if (lifecycle.size >= 10) {
+                events = lifecycle.mapNotNull { dp ->
+                    when (dp.key) {
+                        "app_foreground" -> dp.copy(value = "screen_on")
+                        "app_background" -> dp.copy(value = "screen_off")
+                        else -> null
+                    }
+                }.sortedBy { it.timestamp }
+            }
+        }
 
         if (events.size < 10) return emptyList()
 
@@ -503,18 +542,28 @@ class InsightsViewModel @Inject constructor(
         val sevenDaysAgo = now - 7 * 86_400_000L
         val fourteenDaysAgo = now - 14 * 86_400_000L
 
-        // Current 7-day window: get latest poll per package
-        // Key format is "package_usage:<pkg>", so filter from full collector query
+        // Primary: usage_stats
         val recent = dao.byCollectorSince("usage_stats", sevenDaysAgo)
             .filter { it.key.startsWith("package_usage:") }
 
-        // Group by package, take the entry with max foreground time (latest poll snapshot)
         val currentMap = recent.groupBy { it.key.removePrefix("package_usage:") }
             .mapValues { (_, entries) ->
                 entries.mapNotNull { parseForegroundMs(it.value) }.maxOrNull() ?: 0L
             }
 
-        // Baseline: 7-14 days ago
+        // Fallback: logcat focus entries as proxy (count × avg_poll_interval as rough ms)
+        val effectiveMap = if (currentMap.isEmpty()) {
+            val logcatData = dao.byCollectorSince("logcat", sevenDaysAgo)
+                .filter { it.key.startsWith("focus:") }
+            if (logcatData.isNotEmpty()) {
+                logcatData.groupBy { it.key.removePrefix("focus:") }
+                    .mapValues { (_, entries) ->
+                        // Sum launch counts, estimate ~2 min foreground per launch
+                        entries.mapNotNull { it.value.toLongOrNull() }.sum() * 120_000L
+                    }
+            } else currentMap
+        } else currentMap
+
         val baseline = dao.byCollectorSince("usage_stats", fourteenDaysAgo)
             .filter { it.key.startsWith("package_usage:") && it.timestamp < sevenDaysAgo }
             .groupBy { it.key.removePrefix("package_usage:") }
@@ -522,7 +571,7 @@ class InsightsViewModel @Inject constructor(
                 entries.mapNotNull { parseForegroundMs(it.value) }.maxOrNull() ?: 0L
             }
 
-        return currentMap.entries
+        return effectiveMap.entries
             .sortedByDescending { it.value }
             .take(10)
             .map { (pkg, fgMs) ->
@@ -555,8 +604,19 @@ class InsightsViewModel @Inject constructor(
         val batteryDrainRateThreshold = prefs.getAnomalyThresholdSync("battery_drain_rate", 5.0f)
         val dataFlowTxRxThreshold = prefs.getAnomalyThresholdSync("data_flow_tx_rx_ratio", 3.0f)
 
-        // 1. Unusual unlock count
-        val screenEventsWeek = dao.byCollectorKeySince("screen_state", "event", sevenDaysAgo)
+        // 1. Unusual unlock count (primary: screen_state, fallback: app_lifecycle)
+        var screenEventsWeek = dao.byCollectorKeySince("screen_state", "event", sevenDaysAgo)
+        if (screenEventsWeek.size < 5) {
+            val lifecycle = dao.byCollectorSince("app_lifecycle", sevenDaysAgo)
+            val synthesized = lifecycle.mapNotNull { dp ->
+                when (dp.key) {
+                    "app_foreground" -> dp.copy(value = "screen_on")
+                    "app_background" -> dp.copy(value = "screen_off")
+                    else -> null
+                }
+            }
+            if (synthesized.size > screenEventsWeek.size) screenEventsWeek = synthesized
+        }
         val unlocksByDay = screenEventsWeek
             .filter { it.value == "screen_on" }
             .groupBy { Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate() }
@@ -700,10 +760,16 @@ class InsightsViewModel @Inject constructor(
         val notifications = dao.byCollectorKeySince("notification_listener", "notif_posted", sevenDaysAgo)
             .sortedBy { it.timestamp }
 
-        val unlocks = dao.byCollectorKeySince("screen_state", "event", sevenDaysAgo)
+        // Primary: screen_state unlocks. Fallback: app_lifecycle foreground events
+        var unlocks = dao.byCollectorKeySince("screen_state", "event", sevenDaysAgo)
             .filter { it.value == "screen_on" }
             .sortedBy { it.timestamp }
             .map { it.timestamp }
+        if (unlocks.isEmpty()) {
+            unlocks = dao.byCollectorKeySince("app_lifecycle", "app_foreground", sevenDaysAgo)
+                .sortedBy { it.timestamp }
+                .map { it.timestamp }
+        }
 
         if (notifications.isEmpty() || unlocks.isEmpty()) return emptyList()
 
@@ -780,7 +846,19 @@ class InsightsViewModel @Inject constructor(
     private suspend fun computeMonthlyTrends(): List<MonthlyTrend> {
         val sixMonthsAgo = System.currentTimeMillis() - 180 * 86_400_000L
 
-        val screenEvents = dao.byCollectorKeySince("screen_state", "event", sixMonthsAgo)
+        var screenEvents = dao.byCollectorKeySince("screen_state", "event", sixMonthsAgo)
+        // Fallback: synthesize from app_lifecycle
+        if (screenEvents.size < 20) {
+            val lifecycle = dao.byCollectorSince("app_lifecycle", sixMonthsAgo)
+            val synthesized = lifecycle.mapNotNull { dp ->
+                when (dp.key) {
+                    "app_foreground" -> dp.copy(value = "screen_on")
+                    "app_background" -> dp.copy(value = "screen_off")
+                    else -> null
+                }
+            }
+            if (synthesized.size >= 20) screenEvents = synthesized
+        }
         if (screenEvents.size < 20) return emptyList()
 
         val stepEvents = dao.byCollectorKeySince("steps", "step_counter_delta", sixMonthsAgo)
@@ -854,8 +932,21 @@ class InsightsViewModel @Inject constructor(
         val sevenDaysAgo = now - 7 * 86_400_000L
         val thirtyDaysAgo = now - 30 * 86_400_000L
 
-        val screenEvents = dao.byCollectorKeySince("screen_state", "event", sevenDaysAgo)
+        var screenEvents = dao.byCollectorKeySince("screen_state", "event", sevenDaysAgo)
             .sortedBy { it.timestamp }
+
+        // Fallback: app_lifecycle foreground/background as session boundaries
+        if (screenEvents.size < 4) {
+            val lifecycle = dao.byCollectorSince("app_lifecycle", sevenDaysAgo)
+            val synthesized = lifecycle.mapNotNull { dp ->
+                when (dp.key) {
+                    "app_foreground" -> dp.copy(value = "screen_on")
+                    "app_background" -> dp.copy(value = "screen_off")
+                    else -> null
+                }
+            }.sortedBy { it.timestamp }
+            if (synthesized.size >= 4) screenEvents = synthesized
+        }
 
         if (screenEvents.size < 4) return null
 
@@ -916,8 +1007,24 @@ class InsightsViewModel @Inject constructor(
 
     private suspend fun computePrivacyRadar(): List<PrivacyRadarEntry> {
         val ninetyDaysAgo = System.currentTimeMillis() - 90 * 86_400_000L
-        val opsData = dao.byCollectorSince("appops_audit", ninetyDaysAgo)
+        var opsData = dao.byCollectorSince("appops_audit", ninetyDaysAgo)
             .filter { it.key.startsWith("appops:") }
+
+        // Fallback: privacy_dashboard collector (Android 12+ reflection-based)
+        if (opsData.isEmpty()) {
+            val dashData = dao.byCollectorSince("privacy_dashboard", ninetyDaysAgo)
+                .filter { it.key.startsWith("usage:") }
+            if (dashData.isNotEmpty()) {
+                // Convert privacy_dashboard format to appops-like format
+                // Dashboard key: "usage:<pkg>:<permission_group>", value has last_access_ms
+                opsData = dashData.map { dp ->
+                    val parts = dp.key.removePrefix("usage:").split(":", limit = 2)
+                    val pkg = parts.getOrElse(0) { "" }
+                    val group = parts.getOrElse(1) { "" }
+                    dp.copy(key = "appops:$pkg:$group")
+                }
+            }
+        }
 
         if (opsData.isEmpty()) return emptyList()
 
@@ -996,41 +1103,56 @@ class InsightsViewModel @Inject constructor(
         // Focus entries: key="focus:<pkg>", value = launch count for that poll
         val focusEntries = logcatData.filter { it.key.startsWith("focus:") }
 
-        if (focusEntries.isEmpty()) return emptyList()
+        // Primary: logcat focus entries
+        if (focusEntries.isNotEmpty()) {
+            val launchCounts = mutableMapOf<String, Int>()
+            val firstSeen = mutableMapOf<String, Long>()
+            val lastSeen = mutableMapOf<String, Long>()
 
-        // Sum up launch counts per package across all polls
-        val launchCounts = mutableMapOf<String, Int>()
-        val firstSeen = mutableMapOf<String, Long>()
-        val lastSeen = mutableMapOf<String, Long>()
+            for (entry in focusEntries) {
+                val pkg = entry.key.removePrefix("focus:")
+                val count = entry.value.toLongOrNull()?.toInt() ?: 1
+                launchCounts[pkg] = (launchCounts[pkg] ?: 0) + count
+                if (firstSeen[pkg] == null || entry.timestamp < firstSeen[pkg]!!) {
+                    firstSeen[pkg] = entry.timestamp
+                }
+                if (lastSeen[pkg] == null || entry.timestamp > lastSeen[pkg]!!) {
+                    lastSeen[pkg] = entry.timestamp
+                }
+            }
 
-        for (entry in focusEntries) {
-            val pkg = entry.key.removePrefix("focus:")
-            val count = entry.value.toLongOrNull()?.toInt() ?: 1
-            launchCounts[pkg] = (launchCounts[pkg] ?: 0) + count
-            if (firstSeen[pkg] == null || entry.timestamp < firstSeen[pkg]!!) {
-                firstSeen[pkg] = entry.timestamp
-            }
-            if (lastSeen[pkg] == null || entry.timestamp > lastSeen[pkg]!!) {
-                lastSeen[pkg] = entry.timestamp
-            }
+            return launchCounts.entries
+                .filter { it.value >= 3 }
+                .map { (pkg, count) ->
+                    val first = firstSeen[pkg] ?: 0L
+                    val last = lastSeen[pkg] ?: 0L
+                    val spanMinutes = ((last - first) / 60_000.0).coerceAtLeast(1.0)
+                    val avgGap = if (count > 1) spanMinutes / (count - 1) else spanMinutes
+                    AppCompulsion(pkg, count, avgGap)
+                }
+                .sortedByDescending { it.launchCount }
+                .take(10)
         }
 
-        // Also sum the total app_launches count for context
-        val totalLaunchEntries = logcatData.filter { it.key == "app_launches" }
-            .mapNotNull { it.value.toLongOrNull() }.sum()
+        // Fallback: usage_stats launch counts (from JSON payload)
+        val usageData = dao.byCollectorSince("usage_stats", sevenDaysAgo)
+            .filter { it.key.startsWith("package_usage:") }
+        if (usageData.isEmpty()) return emptyList()
 
-        return launchCounts.entries
-            .filter { it.value >= 3 }
-            .map { (pkg, count) ->
-                val first = firstSeen[pkg] ?: 0L
-                val last = lastSeen[pkg] ?: 0L
-                val spanMinutes = ((last - first) / 60_000.0).coerceAtLeast(1.0)
-                val avgGap = if (count > 1) spanMinutes / (count - 1) else spanMinutes
-
-                AppCompulsion(pkg, count, avgGap)
+        val launchCountsFromUsage = usageData.groupBy { it.key.removePrefix("package_usage:") }
+            .mapNotNull { (pkg, entries) ->
+                val latestJson = entries.maxByOrNull { it.timestamp }?.value ?: return@mapNotNull null
+                val launches = Regex(""""launch_count":(\d+)""").find(latestJson)
+                    ?.groupValues?.get(1)?.toIntOrNull() ?: return@mapNotNull null
+                if (launches < 3) return@mapNotNull null
+                // Estimate avg gap from 7-day span
+                val avgGap = (7 * 24 * 60.0) / launches.coerceAtLeast(1)
+                AppCompulsion(pkg, launches, avgGap)
             }
             .sortedByDescending { it.launchCount }
             .take(10)
+
+        return launchCountsFromUsage
     }
 
     // ── Card 12: Device Health ───────────────────────────────────────
@@ -1040,35 +1162,66 @@ class InsightsViewModel @Inject constructor(
         val oneDayAgo = now - 86_400_000L
 
         val sysStats = dao.byCollectorSince("system_stats", oneDayAgo)
-        if (sysStats.isEmpty()) return null
 
-        // Latest values
-        fun latestValue(key: String): String? =
-            sysStats.filter { it.key == key }.maxByOrNull { it.timestamp }?.value
+        if (sysStats.isNotEmpty()) {
+            // Primary: full system_stats data
+            fun latestValue(key: String): String? =
+                sysStats.filter { it.key == key }.maxByOrNull { it.timestamp }?.value
 
-        val ramPct = latestValue("ram_used_pct")?.toDoubleOrNull() ?: return null
-        val procCount = latestValue("running_process_count")?.toIntOrNull() ?: 0
-        val fgCount = latestValue("foreground_processes")?.toIntOrNull() ?: 0
-        val bgCount = latestValue("background_processes")?.toIntOrNull() ?: 0
-        val thermal = latestValue("thermal_status") ?: "unknown"
-        val uptimeMs = latestValue("uptime_ms")?.toLongOrNull() ?: 0L
+            val ramPct = latestValue("ram_used_pct")?.toDoubleOrNull() ?: return null
+            val procCount = latestValue("running_process_count")?.toIntOrNull() ?: 0
+            val fgCount = latestValue("foreground_processes")?.toIntOrNull() ?: 0
+            val bgCount = latestValue("background_processes")?.toIntOrNull() ?: 0
+            val thermal = latestValue("thermal_status") ?: "unknown"
+            val uptimeMs = latestValue("uptime_ms")?.toLongOrNull() ?: 0L
 
-        // Memory trend: compare earliest to latest ram_used_pct
-        val ramReadings = sysStats.filter { it.key == "ram_used_pct" }
-            .mapNotNull { dp -> dp.value.toDoubleOrNull()?.let { dp.timestamp to it } }
-            .sortedBy { it.first }
-        val memTrend = if (ramReadings.size >= 2) {
-            ramReadings.last().second - ramReadings.first().second
-        } else 0.0
+            val ramReadings = sysStats.filter { it.key == "ram_used_pct" }
+                .mapNotNull { dp -> dp.value.toDoubleOrNull()?.let { dp.timestamp to it } }
+                .sortedBy { it.first }
+            val memTrend = if (ramReadings.size >= 2) {
+                ramReadings.last().second - ramReadings.first().second
+            } else 0.0
+
+            return DeviceHealth(
+                ramUsedPct = ramPct,
+                processCount = procCount,
+                foregroundCount = fgCount,
+                backgroundCount = bgCount,
+                thermalStatus = thermal,
+                uptimeHours = uptimeMs / 3_600_000.0,
+                memoryTrend = memTrend
+            )
+        }
+
+        // Fallback: partial health from battery + hardware data
+        val batteryData = dao.byCollectorSince("battery", oneDayAgo)
+        if (batteryData.isEmpty()) return null
+
+        fun latestBattery(key: String): String? =
+            batteryData.filter { it.key == key }.maxByOrNull { it.timestamp }?.value
+
+        val level = latestBattery("level")?.toDoubleOrNull() ?: return null
+        val temp = latestBattery("temperature")?.toDoubleOrNull()
+        val thermal = when {
+            temp == null -> "unknown"
+            temp > 45 -> "severe"
+            temp > 40 -> "moderate"
+            temp > 35 -> "light"
+            else -> "none"
+        }
+
+        // Estimate uptime from earliest battery reading today
+        val earliestToday = batteryData.minByOrNull { it.timestamp }?.timestamp ?: now
+        val estimatedUptimeMs = now - earliestToday
 
         return DeviceHealth(
-            ramUsedPct = ramPct,
-            processCount = procCount,
-            foregroundCount = fgCount,
-            backgroundCount = bgCount,
+            ramUsedPct = 0.0, // unknown without system_stats
+            processCount = 0,
+            foregroundCount = 0,
+            backgroundCount = 0,
             thermalStatus = thermal,
-            uptimeHours = uptimeMs / 3_600_000.0,
-            memoryTrend = memTrend
+            uptimeHours = estimatedUptimeMs / 3_600_000.0,
+            memoryTrend = 0.0
         )
     }
 
@@ -1228,8 +1381,24 @@ class InsightsViewModel @Inject constructor(
 
     private suspend fun computeCircadian(): CircadianProfile? {
         val thirtyDaysAgo = System.currentTimeMillis() - 30 * 86_400_000L
-        val events = dao.byCollectorKeySince("screen_state", "event", thirtyDaysAgo)
+        var events = dao.byCollectorKeySince("screen_state", "event", thirtyDaysAgo)
             .filter { it.value == "screen_on" }
+
+        // Fallback: app_lifecycle foreground events as proxy for screen unlocks
+        if (events.size < 30) {
+            val lifecycleEvents = dao.byCollectorKeySince("app_lifecycle", "app_foreground", thirtyDaysAgo)
+            if (lifecycleEvents.size >= 30) {
+                events = lifecycleEvents
+            }
+        }
+        // Fallback 2: logcat app_launches timestamps
+        if (events.size < 30) {
+            val logcatLaunches = dao.byCollectorSince("logcat", thirtyDaysAgo)
+                .filter { it.key.startsWith("focus:") }
+            if (logcatLaunches.size >= 30) {
+                events = logcatLaunches
+            }
+        }
 
         if (events.size < 30) return null
 
@@ -1278,8 +1447,24 @@ class InsightsViewModel @Inject constructor(
 
     private suspend fun computeRoutine(): RoutinePredictability? {
         val fourteenDaysAgo = System.currentTimeMillis() - 14 * 86_400_000L
-        val events = dao.byCollectorKeySince("screen_state", "event", fourteenDaysAgo)
+        var events = dao.byCollectorKeySince("screen_state", "event", fourteenDaysAgo)
             .filter { it.value == "screen_on" }
+
+        // Fallback: app_lifecycle foreground events
+        if (events.size < 50) {
+            val lifecycleEvents = dao.byCollectorKeySince("app_lifecycle", "app_foreground", fourteenDaysAgo)
+            if (lifecycleEvents.size >= 50) {
+                events = lifecycleEvents
+            }
+        }
+        // Fallback 2: logcat focus events
+        if (events.size < 50) {
+            val logcatFocus = dao.byCollectorSince("logcat", fourteenDaysAgo)
+                .filter { it.key.startsWith("focus:") }
+            if (logcatFocus.size >= 50) {
+                events = logcatFocus
+            }
+        }
 
         if (events.size < 50) return null
 
@@ -1363,10 +1548,17 @@ class InsightsViewModel @Inject constructor(
         val notifications = dao.byCollectorKeySince("notification_listener", "notif_posted", sevenDaysAgo)
             .sortedBy { it.timestamp }
 
-        val unlocks = dao.byCollectorKeySince("screen_state", "event", sevenDaysAgo)
+        var unlocks = dao.byCollectorKeySince("screen_state", "event", sevenDaysAgo)
             .filter { it.value == "screen_on" }
             .sortedBy { it.timestamp }
             .map { it.timestamp }
+
+        // Fallback: app_lifecycle foreground timestamps as proxy for unlocks
+        if (unlocks.isEmpty()) {
+            unlocks = dao.byCollectorKeySince("app_lifecycle", "app_foreground", sevenDaysAgo)
+                .sortedBy { it.timestamp }
+                .map { it.timestamp }
+        }
 
         if (notifications.size < 10 || unlocks.isEmpty()) return emptyList()
 
@@ -1410,7 +1602,40 @@ class InsightsViewModel @Inject constructor(
     // ── Inference 5: App Portfolio Profile ────────────────────────────
 
     private suspend fun computeAppPortfolio(): AppPortfolioProfile? {
-        val appData = dao.byCollector("installed_apps", 5000)
+        var appData = dao.byCollector("installed_apps", 5000)
+
+        // Fallback: derive package list from usage_stats entries
+        if (appData.isEmpty()) {
+            val usageData = dao.byCollector("usage_stats", 5000)
+                .filter { it.key.startsWith("package_usage:") }
+            if (usageData.isNotEmpty()) {
+                // Synthesize minimal entries from usage_stats package names
+                appData = usageData.map { dp ->
+                    val pkg = dp.key.removePrefix("package_usage:")
+                    DataPointEntity(
+                        timestamp = dp.timestamp, collectorId = "installed_apps",
+                        category = "APPS", key = pkg,
+                        value = """{"package":"$pkg","is_system":false}""",
+                        valueType = "JSON")
+                }
+            }
+        }
+        // Fallback 2: logcat focus entries for package names
+        if (appData.isEmpty()) {
+            val logcatFocus = dao.byCollector("logcat", 5000)
+                .filter { it.key.startsWith("focus:") }
+            if (logcatFocus.isNotEmpty()) {
+                appData = logcatFocus.map { dp ->
+                    val pkg = dp.key.removePrefix("focus:")
+                    DataPointEntity(
+                        timestamp = dp.timestamp, collectorId = "installed_apps",
+                        category = "APPS", key = pkg,
+                        value = """{"package":"$pkg","is_system":false}""",
+                        valueType = "JSON")
+                }.distinctBy { it.key }
+            }
+        }
+
         if (appData.isEmpty()) return null
 
         // Take the latest snapshot per package
@@ -1542,9 +1767,15 @@ class InsightsViewModel @Inject constructor(
         val sevenDaysAgo = System.currentTimeMillis() - 7 * 86_400_000L
         val wifiData = dao.byCollectorSince("wifi", sevenDaysAgo)
 
-        if (wifiData.isEmpty()) return null
+        var ssidEntries = if (wifiData.isNotEmpty()) {
+            wifiData.filter { it.key == "current_ssid" && it.value.isNotBlank() && it.value != "<unknown ssid>" }
+        } else emptyList()
 
-        val ssidEntries = wifiData.filter { it.key == "current_ssid" && it.value.isNotBlank() && it.value != "<unknown ssid>" }
+        // Fallback: connectivity collector may have SSID or transport info
+        if (ssidEntries.isEmpty()) {
+            val connData = dao.byCollectorSince("connectivity", sevenDaysAgo)
+            ssidEntries = connData.filter { it.key == "ssid" && it.value.isNotBlank() && it.value != "<unknown ssid>" }
+        }
 
         if (ssidEntries.isEmpty()) return null
 
@@ -1588,8 +1819,30 @@ class InsightsViewModel @Inject constructor(
         val usageData = dao.byCollectorSince("usage_stats", sevenDaysAgo)
             .filter { it.key.startsWith("package_usage:") }
 
-        val screenEvents = dao.byCollectorKeySince("screen_state", "event", sevenDaysAgo)
+        var screenEvents = dao.byCollectorKeySince("screen_state", "event", sevenDaysAgo)
             .sortedBy { it.timestamp }
+
+        // Fallback: synthesize screen_on/screen_off from app_lifecycle foreground/background
+        if (screenEvents.size < 20) {
+            val fgEvents = dao.byCollectorKeySince("app_lifecycle", "app_foreground", sevenDaysAgo)
+            val bgEvents = dao.byCollectorKeySince("app_lifecycle", "app_background", sevenDaysAgo)
+            if (fgEvents.size + bgEvents.size >= 20) {
+                val synthList = mutableListOf<DataPointEntity>()
+                for (e in fgEvents) {
+                    synthList.add(DataPointEntity(
+                        timestamp = e.timestamp, collectorId = "screen_state",
+                        category = "DEVICE", key = "event", value = "screen_on",
+                        valueType = "STRING"))
+                }
+                for (e in bgEvents) {
+                    synthList.add(DataPointEntity(
+                        timestamp = e.timestamp, collectorId = "screen_state",
+                        category = "DEVICE", key = "event", value = "screen_off",
+                        valueType = "STRING"))
+                }
+                screenEvents = synthList.sortedBy { it.timestamp }
+            }
+        }
 
         if (screenEvents.size < 20) return null
 
@@ -1741,7 +1994,29 @@ class InsightsViewModel @Inject constructor(
 
     private suspend fun computeWeekdayWeekend(): WeekdayWeekendDelta? {
         val fourteenDaysAgo = System.currentTimeMillis() - 14 * 86_400_000L
-        val screenEvents = dao.byCollectorKeySince("screen_state", "event", fourteenDaysAgo)
+        var screenEvents = dao.byCollectorKeySince("screen_state", "event", fourteenDaysAgo)
+
+        // Fallback: synthesize from app_lifecycle foreground/background
+        if (screenEvents.size < 30) {
+            val fgEvents = dao.byCollectorKeySince("app_lifecycle", "app_foreground", fourteenDaysAgo)
+            val bgEvents = dao.byCollectorKeySince("app_lifecycle", "app_background", fourteenDaysAgo)
+            if (fgEvents.size + bgEvents.size >= 30) {
+                val synthList = mutableListOf<DataPointEntity>()
+                for (e in fgEvents) {
+                    synthList.add(DataPointEntity(
+                        timestamp = e.timestamp, collectorId = "screen_state",
+                        category = "DEVICE", key = "event", value = "screen_on",
+                        valueType = "STRING"))
+                }
+                for (e in bgEvents) {
+                    synthList.add(DataPointEntity(
+                        timestamp = e.timestamp, collectorId = "screen_state",
+                        category = "DEVICE", key = "event", value = "screen_off",
+                        valueType = "STRING"))
+                }
+                screenEvents = synthList.sortedBy { it.timestamp }
+            }
+        }
 
         if (screenEvents.size < 30) return null
 
@@ -1871,10 +2146,15 @@ class InsightsViewModel @Inject constructor(
             else -> "mid_range" to 400
         }
 
-        // Carrier tier
-        val carrierData = dao.byCollector("carrier", 10)
-        val carrierName = carrierData.filter { it.key == "carrier_name" }
+        // Carrier tier: primary carrier collector, fallback to connectivity for operator name
+        var carrierData = dao.byCollector("carrier", 10)
+        var carrierName = carrierData.filter { it.key == "carrier_name" }
             .maxByOrNull { it.timestamp }?.value?.lowercase() ?: ""
+        if (carrierName.isBlank()) {
+            val connData = dao.byCollector("connectivity", 50)
+            carrierName = connData.filter { it.key == "operator_name" || it.key == "network_operator" }
+                .maxByOrNull { it.timestamp }?.value?.lowercase() ?: ""
+        }
 
         val premiumCarriers = setOf("verizon", "at&t", "t-mobile", "vodafone", "ee", "o2")
         val mvnoKeywords = listOf("mint", "visible", "cricket", "boost", "metro", "straight", "tracfone")
