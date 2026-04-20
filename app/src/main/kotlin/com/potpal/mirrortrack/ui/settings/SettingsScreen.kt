@@ -188,16 +188,18 @@ class SettingsViewModel @Inject constructor(
             .flatMap { it.requiredPermissions }
             .toSet()
 
+        // Infrastructure permissions not tied to any collector — exclude from audit
+        val infraPerms = setOf(
+            "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_SPECIAL_USE",
+            "POST_NOTIFICATIONS", "RECEIVE_BOOT_COMPLETED",
+            "INTERNET", "ACCESS_NETWORK_STATE", "ACCESS_WIFI_STATE",
+            "USE_BIOMETRIC", "WAKE_LOCK",
+            "BIND_NOTIFICATION_LISTENER_SERVICE",
+            "DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+        )
         val unusedPerms = declaredPerms.filter { perm ->
-            // Filter to runtime/dangerous permissions that no enabled collector uses
-            !usedPerms.contains(perm) &&
-            !perm.contains("FOREGROUND_SERVICE") &&
-            !perm.contains("POST_NOTIFICATIONS") &&
-            !perm.contains("RECEIVE_BOOT_COMPLETED") &&
-            !perm.contains("INTERNET") &&
-            !perm.contains("ACCESS_NETWORK_STATE") &&
-            !perm.contains("ACCESS_WIFI_STATE") &&
-            !perm.contains("USE_BIOMETRIC")
+            val shortName = perm.substringAfterLast('.')
+            !usedPerms.contains(perm) && shortName !in infraPerms
         }
 
         val todayMs = System.currentTimeMillis() - 86_400_000

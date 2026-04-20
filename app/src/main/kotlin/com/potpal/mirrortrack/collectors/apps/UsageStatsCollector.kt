@@ -23,7 +23,7 @@ class UsageStatsCollector @Inject constructor() : Collector {
         "Tracks per-app foreground time, last-used timestamps, and launch counts. " +
         "Requires PACKAGE_USAGE_STATS special access permission."
     override val category = Category.APPS
-    override val requiredPermissions: List<String> = emptyList()
+    override val requiredPermissions: List<String> = listOf("android.permission.PACKAGE_USAGE_STATS")
     override val accessTier = AccessTier.SPECIAL_ACCESS
     override val defaultEnabled = false
     override val defaultPollInterval: Duration = 1.hours

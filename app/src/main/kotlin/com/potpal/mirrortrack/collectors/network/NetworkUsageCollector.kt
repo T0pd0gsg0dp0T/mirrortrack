@@ -39,7 +39,7 @@ class NetworkUsageCollector @Inject constructor() : Collector {
         "Shows which apps are the heaviest data consumers and potential " +
         "data exfiltration vectors. Requires PACKAGE_USAGE_STATS."
     override val category = Category.NETWORK
-    override val requiredPermissions: List<String> = emptyList()
+    override val requiredPermissions: List<String> = listOf("android.permission.PACKAGE_USAGE_STATS")
     override val accessTier = AccessTier.ADB
     override val defaultEnabled = false
     override val defaultPollInterval: Duration = 1.hours

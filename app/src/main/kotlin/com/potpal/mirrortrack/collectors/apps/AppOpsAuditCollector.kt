@@ -34,7 +34,7 @@ class AppOpsAuditCollector @Inject constructor() : Collector {
         "contacts, clipboard, and other sensitive resources — and when. " +
         "Requires ADB grant: GET_APP_OPS_STATS."
     override val category = Category.APPS
-    override val requiredPermissions: List<String> = emptyList()
+    override val requiredPermissions: List<String> = listOf("android.permission.GET_APP_OPS_STATS")
     override val accessTier = AccessTier.ADB
     override val defaultEnabled = false
     override val defaultPollInterval: Duration = 2.hours

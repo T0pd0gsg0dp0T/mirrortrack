@@ -39,7 +39,7 @@ class SystemStatsCollector @Inject constructor() : Collector {
         "state. With DUMP permission, sees all running apps — not just this one. " +
         "Requires ADB grant: DUMP."
     override val category = Category.DEVICE_IDENTITY
-    override val requiredPermissions: List<String> = emptyList()
+    override val requiredPermissions: List<String> = listOf("android.permission.DUMP")
     override val accessTier = AccessTier.ADB
     override val defaultEnabled = false
     override val defaultPollInterval: Duration = 30.minutes

@@ -27,7 +27,9 @@ class MediaExifCollector @Inject constructor() : Collector {
         "or READ_EXTERNAL_STORAGE."
     override val category = Category.PERSONAL
     override val requiredPermissions: List<String>
-        get() = if (Build.VERSION.SDK_INT >= 33) {
+        get() = if (Build.VERSION.SDK_INT >= 34) {
+            listOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+        } else if (Build.VERSION.SDK_INT >= 33) {
             listOf(Manifest.permission.READ_MEDIA_IMAGES)
         } else {
             listOf(Manifest.permission.READ_EXTERNAL_STORAGE)

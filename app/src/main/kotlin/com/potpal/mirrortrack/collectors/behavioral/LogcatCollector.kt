@@ -42,7 +42,7 @@ class LogcatCollector @Inject constructor() : Collector {
         "network transitions, and process lifecycle events from all apps. " +
         "Requires ADB grant: READ_LOGS."
     override val category = Category.BEHAVIORAL
-    override val requiredPermissions: List<String> = emptyList()
+    override val requiredPermissions: List<String> = listOf("android.permission.READ_LOGS")
     override val accessTier = AccessTier.ADB
     override val defaultEnabled = false
     override val defaultPollInterval: Duration = 15.minutes
