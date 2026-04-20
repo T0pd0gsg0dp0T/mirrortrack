@@ -1,143 +1,246 @@
 # MirrorTrack
 
-A personal Android app that collects the same categories of device,
-behavioral, and sensor data that third-party tracker SDKs typically harvest —
-but stores it only in a local SQLCipher-encrypted database for the device
-owner's own inspection.
+**See your own data the way trackers do.**
 
-No cloud. No analytics. No crash reporting. No transmission. All collection
-is opt-in per-category.
+MirrorTrack is a personal Android app that collects the same device, behavioral, and sensor data that third-party tracker SDKs silently harvest from your phone — but instead of shipping it to ad networks, it stores everything in a local SQLCipher-encrypted database that only you can unlock. Nothing leaves your device. Ever.
 
-## Why
+## The Problem
 
-Most people have no idea how much their phone broadcasts about them, and the
-existing tools (Exodus Privacy, TrackerControl, PCAPdroid) show *what leaves
-the device*. MirrorTrack takes the complementary angle: it collects the
-same fields a tracker SDK would, so you can inspect your own fingerprint
-at the source. Useful for:
+Your phone leaks an extraordinary amount of information about you. Advertising SDKs embedded in the apps you use every day collect your device fingerprint, location history, app usage patterns, screen behavior, sensor readings, network identifiers, and more — then transmit it all to data brokers and ad exchanges you've never heard of.
 
-- Understanding what a given ad SDK actually sees
-- Building a personal baseline for anomaly detection
-- Offline analysis of your own behavioral patterns
-- Curiosity
+Existing privacy tools like Exodus Privacy and TrackerControl show you *what leaves your device*. MirrorTrack takes the complementary approach: it collects the same fields a tracker SDK would, so you can inspect your own data portrait at the source — before it ever reaches a network boundary.
 
-## Status
+## What It Does
 
-Scaffold / skeleton. Compiles, runs, has two reference collectors wired
-end-to-end through the Ingestor + SQLCipher Room DB. Not yet:
+MirrorTrack runs 28 data collectors across 7 categories, feeding a unified encrypted database that powers 25 insight cards with real behavioral inference:
 
-- Unlock UI (passphrase entry → key derivation → DB open)
-- Live feed screen
-- Category browser
-- Remaining ~35 collectors
-- Foreground service runtime
-- Export / purge
-- Per-collector retention policy
+### Data Collection (28 Collectors)
 
-See `CLAUDE.md` for the conventions and architectural rules the project
-follows. That file is also the context Claude Code reads on first interaction.
+| Category | Collectors | Examples |
+|----------|-----------|----------|
+| **Device** | 5 | Build info, hardware specs, unique identifiers, integrity checks, system stats |
+| **Behavioral** | 5 | Screen on/off, battery state, app lifecycle, boot events, logcat streams |
+| **Location** | 2 | GPS/network fixes, activity recognition (walking/driving/still) |
+| **Network** | 6 | WiFi SSIDs, Bluetooth devices, carrier info, public IP, connectivity state, per-app data usage |
+| **Apps** | 5 | Installed packages, usage stats, notification listener, AppOps audit, privacy dashboard |
+| **Sensors** | 4 | Accelerometer/gyroscope, environment (light/pressure/temp), step counter, body sensors |
+| **Personal** | 3 | Calendar events, contacts metadata, photo EXIF data |
 
-## Repo layout
+Every collector is **opt-in** — disabled by default, toggled individually in Settings. Each permission is gated behind an in-app explanation before any runtime request.
+
+### Insight Engine (25 Cards)
+
+The Insights screen processes raw data points into behavioral intelligence — the same kind of profiles that ad tech builds about you:
+
+| Card | What It Reveals |
+|------|----------------|
+| **Today** | Daily dashboard: data points, unlocks, screen time, steps, battery delta |
+| **Sleep Heatmap** | 13-week sleep duration grid with bedtime/wake detection from screen-off gaps |
+| **App Attention** | Top apps by foreground time with week-over-week delta |
+| **Anomaly Feed** | Statistical outliers in your behavior (unusual unlock counts, screen time spikes) |
+| **Location Clusters** | GPS fix clustering with interactive dot map and user-renamable places |
+| **Unlock Latency** | Median time from notification to screen unlock, per app |
+| **Fingerprint Stability** | Device identity field tracking — what changed and when |
+| **Monthly Trends** | 6-month behavioral comparison: unlocks, screen time, steps |
+| **Engagement Score** | DAU/WAU stickiness, session frequency, retention flags |
+| **Privacy Radar** | Per-app privacy invasion score from camera/mic/location/contacts access |
+| **Data Flow** | Network TX/RX per app with suspicious upload ratio flagging |
+| **App Compulsion** | Most-launched apps by frequency with inter-launch gap |
+| **Device Health** | RAM pressure, process counts, thermal status, uptime |
+| **Identity Entropy** | Fingerprint uniqueness quantified in bits (1-in-N device calculation) |
+| **Home & Work** | Location inference from GPS clusters + time-of-day analysis |
+| **Circadian Rhythm** | 24-hour unlock histogram, chronotype classification, activity spread |
+| **Routine Predictability** | Hourly entropy scoring, weekday/weekend cosine distance |
+| **Social Pressure** | Notification-to-unlock correlation per app, response rate ranking |
+| **App Portfolio** | Installed app categorization with demographic inference |
+| **Charging Behavior** | Charge cycles, discharge depth, overnight patterns |
+| **WiFi Footprint** | SSID frequency distribution, Shannon entropy mobility score |
+| **Session Fragmentation** | App-switching rate as attention span proxy |
+| **Dwell Times** | Per-location visit duration with classification (home/work/transit/retail) |
+| **Weekday vs Weekend** | Side-by-side behavioral comparison with divergence scoring |
+| **Income Inference** | Socioeconomic tier from device model + carrier + app signals |
+| **Commute Pattern** | Departure/return times, transport mode, consistency scoring |
+
+### Security
+
+- **SQLCipher encryption** — AES-256-CBC with HMAC-SHA512 page authentication
+- **Argon2id key derivation** — passphrase stretched with memory-hard KDF
+- **Passphrase hygiene** — never touches disk unencrypted, zeroed from memory after use
+- **Android Keystore** wraps the salt at rest
+- **No cloud backup** — `android:allowBackup="false"` with data extraction rules
+- **No logging** of collected data in release builds
+
+## Architecture
 
 ```
-mirrortrack/
-├── CLAUDE.md                      Conventions, constraints, non-negotiables
-├── .claude/commands/              Slash commands for Claude Code
-├── app/
-│   ├── build.gradle.kts
-│   └── src/main/
-│       ├── AndroidManifest.xml    Permission declarations, audited
-│       ├── kotlin/com/potpal/mirrortrack/
-│       │   ├── MirrorTrackApp.kt
-│       │   ├── collectors/
-│       │   │   ├── Collector.kt           Interface
-│       │   │   ├── DataPoint.kt           Unified event shape
-│       │   │   ├── Category.kt            Enum
-│       │   │   ├── Ingestor.kt            Batching write gateway
-│       │   │   ├── CollectorRegistry.kt   Hilt binding of all collectors
-│       │   │   ├── device/
-│       │   │   │   └── BuildInfoCollector.kt       (polled, reference)
-│       │   │   └── behavioral/
-│       │   │       ├── ScreenStateCollector.kt     (streamed, reference)
-│       │   │       └── BootReceiver.kt
-│       │   ├── data/
-│       │   │   ├── MirrorDatabase.kt      Room + SQLCipher
-│       │   │   ├── DatabaseModule.kt      Hilt + DatabaseHolder lifecycle
-│       │   │   ├── DataPointDao.kt
-│       │   │   ├── CryptoManager.kt       Argon2id KDF
-│       │   │   └── entities/DataPointEntity.kt
-│       │   └── ui/MainActivity.kt         Stub Compose host
-│       └── res/
-├── gradle/libs.versions.toml      Central version catalog
-├── desktop-analysis/
-│   ├── decrypt.py                 Offline Argon2 + SQLCipher decrypt
-│   ├── explore.py                 DuckDB starter queries
-│   └── requirements.txt
-└── README.md
+Collector (interface)
+  |-- polled: suspend fun collect() -> List<DataPoint>
+  |-- streamed: fun stream() -> Flow<DataPoint>
+            |
+            v
+        Ingestor (singleton)
+          |-- in-memory ring buffer (4096 capacity)
+          |-- flush trigger: size >= 100 OR elapsed >= 60s
+          |-- overflow monitoring with drop counters
+            |
+            v
+        MirrorDatabase (SQLCipher Room)
+          |-- data_points table (unified schema)
+          |-- RetentionWorker (periodic expiry)
+            |
+            v
+        InsightsViewModel
+          |-- 25 async computations
+          |-- behavioral inference engine
+          |-- anomaly detection
 ```
 
-## First build
+**Unified DataPoint schema** — every collector emits the same shape:
+
+```kotlin
+data class DataPoint(
+    val timestamp: Long,        // epoch millis
+    val collectorId: String,    // "build_info", "screen_state"
+    val category: Category,     // enum: DEVICE, BEHAVIORAL, LOCATION, ...
+    val key: String,            // "manufacturer", "screen_on"
+    val value: String,          // JSON-encoded
+    val valueType: ValueType    // STRING | LONG | DOUBLE | BOOLEAN | JSON
+)
+```
+
+One row per field. A single `BuildInfoCollector` poll produces ~15 rows. This is deliberate: zero schema churn as new collectors arrive, and DuckDB pivots trivially on desktop for offline analysis.
+
+**Adding a new collector** is a single-file operation:
+1. Create `collectors/<category>/<Name>Collector.kt` implementing `Collector`
+2. Register it in `CollectorRegistry` (Hilt multibinding)
+3. Done. It appears automatically in Settings and Category Browser.
+
+## Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Language | Kotlin 2.1, JDK 17 |
+| UI | Jetpack Compose (BOM 2024.11) |
+| DI | Hilt 2.52 |
+| Database | Room 2.6.1 + SQLCipher 4.6.1 |
+| KDF | Argon2kt 1.6 |
+| Scheduling | WorkManager 2.9 + Foreground Service |
+| Settings | DataStore (Preferences) |
+| Async | kotlinx.coroutines + Flow |
+| Min SDK | 26 (Android 8.0) |
+| Target SDK | 34 (Android 14) |
+
+**Explicitly excluded:** Firebase, Google Play Services, Crashlytics, any analytics SDK, any ad SDK. Not even transitively. The `INTERNET` permission exists solely for one public-IP lookup collector.
+
+## Build & Install
 
 ```bash
-# From repo root. Assumes Android SDK + JDK 17 installed.
+# Requires Android SDK + JDK 17
 ./gradlew :app:assembleDebug
+
+# Install to connected device
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+# Grant ADB-tier permissions for advanced collectors
+adb shell pm grant com.potpal.mirrortrack android.permission.PACKAGE_USAGE_STATS
+adb shell appops set com.potpal.mirrortrack GET_USAGE_STATS allow
 ```
 
-Install to a connected device:
+## Desktop Analysis
 
-```bash
-./gradlew :app:installDebug
-adb shell am start -n com.potpal.mirrortrack.debug/com.potpal.mirrortrack.ui.MainActivity
-```
-
-Current on-launch behavior: blank Compose screen with a placeholder string.
-That's expected for the scaffold.
-
-## Desktop analysis
-
-After exporting an encrypted DB from the phone (feature not yet implemented
-— for now, pull it with the `/dump-db` slash command):
+Pull the encrypted database off the device and analyze offline with DuckDB:
 
 ```bash
 cd desktop-analysis
 pip install -r requirements.txt
+
+# Decrypt (prompts for passphrase)
 python decrypt.py /tmp/mirrortrack.db.enc /tmp/salt.bin
+
+# Explore with pre-built queries
 python explore.py /tmp/mirrortrack.db
 ```
 
-## Immediate next steps for Claude Code
+## Repo Layout
 
-Suggested order, each a tractable session:
+```
+mirrortrack/
++-- CLAUDE.md                         Architecture rules & constraints
++-- .claude/commands/                  Dev slash commands (build, install, dump-db)
++-- app/src/main/kotlin/.../
+|   +-- collectors/
+|   |   +-- Collector.kt              Interface + AccessTier enum
+|   |   +-- DataPoint.kt              Unified event shape
+|   |   +-- Ingestor.kt               Batching write gateway
+|   |   +-- CollectorRegistry.kt      Hilt multibinding
+|   |   +-- device/                    BuildInfo, Hardware, Identifiers, Integrity, SystemStats
+|   |   +-- behavioral/               Screen, Battery, AppLifecycle, Logcat, Boot
+|   |   +-- location/                  GPS, ActivityRecognition
+|   |   +-- network/                   WiFi, Bluetooth, Carrier, IP, Connectivity, Usage
+|   |   +-- apps/                      Installed, UsageStats, Notifications, AppOps, Privacy
+|   |   +-- sensors/                   Motion, Environment, Step, Body
+|   |   +-- personal/                  Calendar, Contacts, MediaExif
+|   +-- data/
+|   |   +-- MirrorDatabase.kt         Room + SQLCipher
+|   |   +-- CryptoManager.kt          Argon2id KDF + salt management
+|   |   +-- KeystoreManager.kt        Android Keystore wrapping
+|   |   +-- DatabaseModule.kt         Hilt + DatabaseHolder lifecycle
+|   +-- scheduling/
+|   |   +-- CollectionForegroundService.kt
+|   |   +-- PolledCollectionWorker.kt
+|   |   +-- CollectorHealthTracker.kt
+|   |   +-- RetentionWorker.kt
+|   +-- export/
+|   |   +-- ExportManager.kt          Encrypted zip export
+|   |   +-- ImportManager.kt          Backup restore with salt handling
+|   |   +-- TrackerPayloadGenerator.kt
+|   +-- ui/
+|   |   +-- unlock/                    Passphrase entry + key derivation
+|   |   +-- feed/                      Real-time data point stream
+|   |   +-- insights/                  25-card behavioral analysis (2800+ lines)
+|   |   +-- categories/                Category browser + detail drill-down
+|   |   +-- settings/                  Per-collector toggles + health indicators
+|   |   +-- permissions/               Runtime permission flow
+|   +-- settings/CollectorPreferences.kt  DataStore-backed preferences
+|   +-- util/Logger.kt                    Debug-gated logging wrapper
++-- app/src/test/                      17 unit tests
++-- desktop-analysis/                  Python decrypt + DuckDB exploration
++-- gradle/libs.versions.toml         Central version catalog
+```
 
-1. **Unlock flow**: `UnlockScreen`, `UnlockViewModel`, wire to `CryptoManager`
-   + `DatabaseHolder.open()`. Gate `MainActivity` content on `isOpen()`.
-2. **LiveFeedScreen**: observe `dao.observeRecent()`, render reverse-chrono list.
-3. **CollectionForegroundService**: ongoing notification, launches enabled
-   collectors. Register `ScreenStateCollector.stream()` into `Ingestor`.
-4. **CollectionScheduler**: WorkManager periodic worker, invokes enabled
-   polled collectors at their configured cadence.
-5. **Third collector**: `BatteryCollector`. Polled, event-driven hybrid
-   (registerReceiver on `ACTION_BATTERY_CHANGED` is sticky — emit current
-   state on subscribe, then stream changes). Good exercise for the hybrid case.
-6. Then add collectors one per session until the full catalog (~40) is covered.
+## Permission Tiers
 
-## Threat model (honest)
+| Tier | Access | Examples |
+|------|--------|----------|
+| **NONE** | Available immediately | Build info, sensors, battery |
+| **RUNTIME** | Standard permission dialog | Location, contacts, calendar, Bluetooth |
+| **SPECIAL_ACCESS** | Manual Settings toggle | Usage stats, notification listener |
+| **RESTRICTED** | Play Store policy gated | `QUERY_ALL_PACKAGES` |
+| **ADB** | Developer shell grant | `READ_LOGS`, `GET_APP_OPS_STATS`, `DUMP` |
 
-What this protects against:
-- Casual inspection of the device by someone without the passphrase
-- Cloud backup / `adb backup` extraction (disabled + data extraction rules)
+## Threat Model
+
+**Protects against:**
+- Casual device inspection without the passphrase
+- Cloud backup extraction (`adb backup` disabled, data extraction rules set)
 - A lost/stolen locked phone
+- Third-party app data access (SQLCipher + app-private storage)
 
-What this does NOT protect against:
-- Rooted attacker with the unlocked phone in hand (until Keystore wrapping
-  is added)
-- Passphrase brute force if you pick a bad passphrase
+**Does NOT protect against:**
+- Rooted attacker with the unlocked phone in hand
+- Passphrase brute force with a weak passphrase
 - Malware with root or accessibility service access
 - Hardware attacks (cold boot, JTAG)
-- Your future self forgetting the passphrase (there's no recovery — that's
-  the whole point)
+- Forgetting your passphrase (there is no recovery — that's the point)
+
+## Out of Scope (by design)
+
+- **No VPN/network interception** — other tools (PCAPdroid, TrackerControl) do this better
+- **No AccessibilityService** — Play Store ban territory, ethical concerns
+- **No root-required features** — must work on stock Android
+- **No cloud sync** — the entire point is local-only
+- **No multi-user** — single device owner by design
 
 ## License
 
-TBD. Lean toward GPL-3 if publishing, to match the TrackerControl / F-Droid
-norm for privacy tooling.
+TBD. Leaning GPL-3.0 to align with the privacy tooling ecosystem (TrackerControl, F-Droid norms).
