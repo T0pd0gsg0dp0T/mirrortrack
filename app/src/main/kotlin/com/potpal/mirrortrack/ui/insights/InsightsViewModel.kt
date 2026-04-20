@@ -19,6 +19,98 @@ import java.time.ZoneId
 import javax.inject.Inject
 import kotlin.math.sqrt
 
+// ── Insight metadata ─────────────────────────────────────────────────
+
+/**
+ * Confidence tier — drives visual treatment of each card.
+ * LOW shows "Based on limited data", MODERATE shows a dimmed badge,
+ * HIGH shows nothing (default), STALE shows a staleness warning.
+ */
+enum class ConfidenceTier { LOW, MODERATE, HIGH }
+
+/**
+ * Per-card metadata tracking data provenance, quality, and freshness.
+ */
+data class InsightMeta(
+    val confidence: ConfidenceTier = ConfidenceTier.HIGH,
+    val dataSource: String = "primary",       // "primary", "fallback:app_lifecycle", etc.
+    val dataPointCount: Int = 0,              // how many data points backed this card
+    val newestDataMs: Long = 0L,              // timestamp of freshest input
+    val isStale: Boolean = false,             // true if newest data > 2x poll interval
+    val attempted: List<String> = emptyList() // sources tried: ["screen_state", "app_lifecycle"]
+) {
+    val age: Long get() = if (newestDataMs > 0) System.currentTimeMillis() - newestDataMs else Long.MAX_VALUE
+    val ageLabel: String get() = when {
+        age < 3_600_000 -> "< 1h old"
+        age < 86_400_000 -> "${age / 3_600_000}h old"
+        else -> "${age / 86_400_000}d old"
+    }
+}
+
+/**
+ * Wraps any insight computation result with its metadata.
+ */
+data class InsightResult<T>(
+    val data: T,
+    val meta: InsightMeta
+)
+
+// ── Collector → Insight dependency graph ─────────────────────────────
+
+/**
+ * Maps each insight card to its primary and fallback collector IDs.
+ * Used by Settings to show "Enables N insight cards" hints, and by
+ * the diagnostic overlay to show data provenance.
+ */
+object InsightDependencyGraph {
+    data class CardDeps(
+        val cardName: String,
+        val primary: List<String>,
+        val fallbacks: List<String>
+    )
+
+    val cards: List<CardDeps> = listOf(
+        CardDeps("Today", listOf("screen_state", "steps", "battery"), listOf("app_lifecycle", "usage_stats", "motion_sensor")),
+        CardDeps("Sleep", listOf("screen_state"), listOf("app_lifecycle")),
+        CardDeps("App Attention", listOf("usage_stats"), listOf("logcat")),
+        CardDeps("Anomalies", listOf("screen_state"), listOf("app_lifecycle")),
+        CardDeps("Location Clusters", listOf("location"), emptyList()),
+        CardDeps("Unlock Latency", listOf("screen_state", "notification_listener"), listOf("app_lifecycle")),
+        CardDeps("Fingerprint", listOf("build_info", "hardware", "identifiers"), emptyList()),
+        CardDeps("Monthly Trends", listOf("screen_state", "steps"), listOf("app_lifecycle")),
+        CardDeps("Engagement", listOf("screen_state"), listOf("app_lifecycle")),
+        CardDeps("Privacy Radar", listOf("appops_audit"), listOf("privacy_dashboard")),
+        CardDeps("Data Flow", listOf("network_usage"), emptyList()),
+        CardDeps("App Compulsion", listOf("logcat"), listOf("usage_stats")),
+        CardDeps("Device Health", listOf("system_stats"), listOf("battery")),
+        CardDeps("Identity Entropy", listOf("build_info", "hardware", "identifiers"), emptyList()),
+        CardDeps("Home/Work", listOf("location"), emptyList()),
+        CardDeps("Circadian", listOf("screen_state"), listOf("app_lifecycle", "logcat")),
+        CardDeps("Routine", listOf("screen_state"), listOf("app_lifecycle", "logcat")),
+        CardDeps("Social Pressure", listOf("notification_listener", "screen_state"), listOf("app_lifecycle")),
+        CardDeps("App Portfolio", listOf("installed_apps"), listOf("usage_stats", "logcat")),
+        CardDeps("Charging", listOf("battery"), emptyList()),
+        CardDeps("WiFi Footprint", listOf("wifi"), listOf("connectivity")),
+        CardDeps("Session Fragmentation", listOf("screen_state", "logcat"), listOf("app_lifecycle")),
+        CardDeps("Dwell Times", listOf("location"), emptyList()),
+        CardDeps("Weekday/Weekend", listOf("screen_state", "usage_stats"), listOf("app_lifecycle")),
+        CardDeps("Income", listOf("build_info", "carrier", "installed_apps"), listOf("connectivity", "usage_stats", "logcat")),
+        CardDeps("Commute", listOf("location"), emptyList())
+    )
+
+    /** Returns how many insight cards this collector feeds (primary + fallback). */
+    fun cardCountForCollector(collectorId: String): Int =
+        cards.count { collectorId in it.primary || collectorId in it.fallbacks }
+
+    /** Returns card names that depend on this collector. */
+    fun cardsForCollector(collectorId: String): List<String> =
+        cards.filter { collectorId in it.primary || collectorId in it.fallbacks }.map { it.cardName }
+
+    /** Returns all collector IDs needed by any card (primary + fallback). */
+    fun allCollectorIds(): Set<String> =
+        cards.flatMap { it.primary + it.fallbacks }.toSet()
+}
+
 // ── Data models ──────────────────────────────────────────────────────
 
 data class InsightsState(
@@ -52,7 +144,11 @@ data class InsightsState(
     val dwellTimes: List<DwellTimeEntry> = emptyList(),
     val weekdayWeekend: WeekdayWeekendDelta? = null,
     val income: IncomeInference? = null,
-    val commute: CommutePattern? = null
+    val commute: CommutePattern? = null,
+    // Per-card metadata
+    val cardMeta: Map<String, InsightMeta> = emptyMap(),
+    // Diagnostics toggle
+    val showDiagnostics: Boolean = false
 )
 
 data class TodayData(
@@ -284,13 +380,110 @@ class InsightsViewModel @Inject constructor(
 
     private val zone: ZoneId = ZoneId.systemDefault()
 
+    // Accumulates metadata from each compute function during refresh
+    private val metaAccumulator = mutableMapOf<String, InsightMeta>()
+
     init {
         refresh()
+    }
+
+    fun toggleDiagnostics() {
+        _state.update { it.copy(showDiagnostics = !it.showDiagnostics) }
+    }
+
+    /**
+     * Build InsightMeta from data points used by a card.
+     * @param cardKey unique card identifier for the meta map
+     * @param source description of the data source used ("primary", "fallback:app_lifecycle", etc.)
+     * @param count number of data points that backed the computation
+     * @param newestMs timestamp of the freshest data point used
+     * @param attempted list of sources tried in order
+     * @param staleThresholdMs if newest data is older than this, mark stale (default 2h)
+     */
+    private fun buildMeta(
+        cardKey: String,
+        source: String,
+        count: Int,
+        newestMs: Long,
+        attempted: List<String>,
+        staleThresholdMs: Long = 7_200_000L
+    ): InsightMeta {
+        val confidence = when {
+            source == "primary" && count >= 50 -> ConfidenceTier.HIGH
+            source == "primary" && count >= 20 -> ConfidenceTier.MODERATE
+            source.startsWith("fallback") && count >= 50 -> ConfidenceTier.MODERATE
+            source.startsWith("fallback") && count >= 20 -> ConfidenceTier.LOW
+            count < 20 -> ConfidenceTier.LOW
+            else -> ConfidenceTier.MODERATE
+        }
+        val isStale = newestMs > 0 && (System.currentTimeMillis() - newestMs) > staleThresholdMs
+        val meta = InsightMeta(confidence, source, count, newestMs, isStale, attempted)
+        metaAccumulator[cardKey] = meta
+        return meta
+    }
+
+    /**
+     * Auto-generate metadata for cards that don't have explicit buildMeta calls.
+     * Queries DAO for freshness of primary collectors. Only creates meta if
+     * not already set by an explicit buildMeta call inside the compute function.
+     */
+    private suspend fun autoMeta(
+        cardKey: String,
+        hasData: Boolean,
+        primaryCollectors: List<String>,
+        fallbackCollectors: List<String>
+    ) {
+        if (metaAccumulator.containsKey(cardKey)) return // already set by compute function
+        if (!hasData) {
+            metaAccumulator[cardKey] = InsightMeta(
+                confidence = ConfidenceTier.LOW,
+                dataSource = "none",
+                dataPointCount = 0,
+                newestDataMs = 0L,
+                isStale = true,
+                attempted = primaryCollectors + fallbackCollectors
+            )
+            return
+        }
+        // Check which collectors have data
+        var source = "primary"
+        var newestMs = 0L
+        var totalCount = 0
+        for (cid in primaryCollectors) {
+            val count = dao.countByCollector(cid)
+            if (count > 0) {
+                totalCount += count.toInt()
+                val latest = dao.byCollector(cid, 1).firstOrNull()
+                if (latest != null && latest.timestamp > newestMs) newestMs = latest.timestamp
+            }
+        }
+        if (totalCount == 0) {
+            source = "fallback"
+            for (cid in fallbackCollectors) {
+                val count = dao.countByCollector(cid)
+                if (count > 0) {
+                    totalCount += count.toInt()
+                    source = "fallback:$cid"
+                    val latest = dao.byCollector(cid, 1).firstOrNull()
+                    if (latest != null && latest.timestamp > newestMs) newestMs = latest.timestamp
+                }
+            }
+        }
+        val confidence = when {
+            source == "primary" && totalCount >= 50 -> ConfidenceTier.HIGH
+            source == "primary" && totalCount >= 10 -> ConfidenceTier.MODERATE
+            source.startsWith("fallback") -> ConfidenceTier.LOW
+            else -> ConfidenceTier.LOW
+        }
+        val isStale = newestMs > 0 && (System.currentTimeMillis() - newestMs) > 7_200_000L
+        metaAccumulator[cardKey] = InsightMeta(confidence, source, totalCount, newestMs, isStale,
+            primaryCollectors + fallbackCollectors)
     }
 
     fun refresh() {
         viewModelScope.launch {
             _state.update { it.copy(loading = true) }
+            metaAccumulator.clear()
 
             val todayDef = async { computeToday() }
             val sleepDef = async { computeSleep() }
@@ -319,34 +512,82 @@ class InsightsViewModel @Inject constructor(
             val incomeDef = async { computeIncome() }
             val commuteDef = async { computeCommute() }
 
+            val today = todayDef.await()
+            val sleepDays = sleepDef.await()
+            val appAttention = appsDef.await()
+            val anomalies = anomalyDef.await()
+            val locationClusters = locDef.await()
+            val unlockLatencies = latencyDef.await()
+            val fingerprint = fpDef.await()
+            val monthlyTrends = trendsDef.await()
+            val engagement = engageDef.await()
+            val privacyRadar = privacyDef.await()
+            val dataFlow = flowDef.await()
+            val appCompulsion = compulsionDef.await()
+            val deviceHealth = healthDef.await()
+            val identityEntropy = entropyDef.await()
+            val homeWork = homeWorkDef.await()
+            val circadian = circadianDef.await()
+            val routine = routineDef.await()
+            val socialPressure = socialDef.await()
+            val appPortfolio = portfolioDef.await()
+            val charging = chargingDef.await()
+            val wifiFootprint = wifiDef.await()
+            val sessionFrag = fragDef.await()
+            val dwellTimes = dwellDef.await()
+            val weekdayWeekend = wdweDef.await()
+            val income = incomeDef.await()
+            val commute = commuteDef.await()
+
+            // Auto-generate metadata for any card not already tracked by buildMeta
+            autoMeta("engagement", engagement != null, listOf("screen_state"), listOf("app_lifecycle"))
+            autoMeta("privacy", privacyRadar.isNotEmpty(), listOf("appops_audit"), listOf("privacy_dashboard"))
+            autoMeta("dataflow", dataFlow.isNotEmpty(), listOf("network_usage"), emptyList())
+            autoMeta("compulsion", appCompulsion.isNotEmpty(), listOf("logcat"), listOf("usage_stats"))
+            autoMeta("health", deviceHealth != null, listOf("system_stats"), listOf("battery"))
+            autoMeta("entropy", identityEntropy != null, listOf("build_info", "hardware", "identifiers"), emptyList())
+            autoMeta("homework", homeWork != null, listOf("location"), emptyList())
+            autoMeta("circadian", circadian != null, listOf("screen_state"), listOf("app_lifecycle", "logcat"))
+            autoMeta("routine", routine != null, listOf("screen_state"), listOf("app_lifecycle", "logcat"))
+            autoMeta("social", socialPressure.isNotEmpty(), listOf("notification_listener", "screen_state"), listOf("app_lifecycle"))
+            autoMeta("portfolio", appPortfolio != null, listOf("installed_apps"), listOf("usage_stats", "logcat"))
+            autoMeta("charging", charging != null, listOf("battery"), emptyList())
+            autoMeta("wifi", wifiFootprint != null, listOf("wifi"), listOf("connectivity"))
+            autoMeta("fragmentation", sessionFrag != null, listOf("screen_state", "logcat"), listOf("app_lifecycle"))
+            autoMeta("dwell", dwellTimes.isNotEmpty(), listOf("location"), emptyList())
+            autoMeta("weekdayweekend", weekdayWeekend != null, listOf("screen_state", "usage_stats"), listOf("app_lifecycle"))
+            autoMeta("income", income != null, listOf("build_info", "carrier"), listOf("connectivity", "usage_stats"))
+            autoMeta("commute", commute?.detected == true, listOf("location"), emptyList())
+
             _state.update { it.copy(
                 loading = false,
-                today = todayDef.await(),
-                sleepDays = sleepDef.await(),
-                appAttention = appsDef.await(),
-                anomalies = anomalyDef.await(),
-                locationClusters = locDef.await(),
-                unlockLatencies = latencyDef.await(),
-                fingerprint = fpDef.await(),
-                monthlyTrends = trendsDef.await(),
-                engagement = engageDef.await(),
-                privacyRadar = privacyDef.await(),
-                dataFlow = flowDef.await(),
-                appCompulsion = compulsionDef.await(),
-                deviceHealth = healthDef.await(),
-                identityEntropy = entropyDef.await(),
-                homeWork = homeWorkDef.await(),
-                circadian = circadianDef.await(),
-                routine = routineDef.await(),
-                socialPressure = socialDef.await(),
-                appPortfolio = portfolioDef.await(),
-                charging = chargingDef.await(),
-                wifiFootprint = wifiDef.await(),
-                sessionFrag = fragDef.await(),
-                dwellTimes = dwellDef.await(),
-                weekdayWeekend = wdweDef.await(),
-                income = incomeDef.await(),
-                commute = commuteDef.await()
+                today = today,
+                sleepDays = sleepDays,
+                appAttention = appAttention,
+                anomalies = anomalies,
+                locationClusters = locationClusters,
+                unlockLatencies = unlockLatencies,
+                fingerprint = fingerprint,
+                monthlyTrends = monthlyTrends,
+                engagement = engagement,
+                privacyRadar = privacyRadar,
+                dataFlow = dataFlow,
+                appCompulsion = appCompulsion,
+                deviceHealth = deviceHealth,
+                identityEntropy = identityEntropy,
+                homeWork = homeWork,
+                circadian = circadian,
+                routine = routine,
+                socialPressure = socialPressure,
+                appPortfolio = appPortfolio,
+                charging = charging,
+                wifiFootprint = wifiFootprint,
+                sessionFrag = sessionFrag,
+                dwellTimes = dwellTimes,
+                weekdayWeekend = weekdayWeekend,
+                income = income,
+                commute = commute,
+                cardMeta = metaAccumulator.toMap()
             ) }
         }
     }
@@ -379,16 +620,24 @@ class InsightsViewModel @Inject constructor(
 
     private suspend fun computeToday(): TodayData {
         val todayStart = LocalDate.now().atStartOfDay(zone).toInstant().toEpochMilli()
+        val attempted = mutableListOf<String>()
+        var source = "primary"
+        var totalCount = 0
 
         val dataPoints = dao.countSince(todayStart)
 
         val screenEvents = dao.byCollectorKeySince("screen_state", "event", todayStart)
+        attempted.add("screen_state")
+        totalCount += screenEvents.size
 
         // Unlocks: primary screen_state, fallback app_lifecycle foreground events
         var unlocks = screenEvents.count { it.value == "screen_on" }
         if (unlocks == 0) {
             val lifecycleEvents = dao.byCollectorKeySince("app_lifecycle", "app_foreground", todayStart)
+            attempted.add("app_lifecycle")
+            totalCount += lifecycleEvents.size
             unlocks = lifecycleEvents.size
+            if (unlocks > 0) source = "fallback:app_lifecycle"
         }
 
         // Screen time: primary screen_state on/off pairs
@@ -441,6 +690,9 @@ class InsightsViewModel @Inject constructor(
 
         val collectors = dao.countByCollectorSince(todayStart)
 
+        val newestMs = screenEvents.maxOfOrNull { it.timestamp } ?: 0L
+        buildMeta("today", source, totalCount, newestMs, attempted, staleThresholdMs = 3_600_000L)
+
         return TodayData(
             dataPoints = dataPoints,
             unlocks = unlocks,
@@ -456,15 +708,19 @@ class InsightsViewModel @Inject constructor(
     private suspend fun computeSleep(): List<SleepDay> {
         val ninetyDaysAgo = LocalDate.now().minusDays(90)
             .atStartOfDay(zone).toInstant().toEpochMilli()
+        val attempted = mutableListOf("screen_state")
+        var source = "primary"
 
         var events = dao.byCollectorKeySince("screen_state", "event", ninetyDaysAgo)
             .sortedBy { it.timestamp }
 
         // Fallback: synthesize screen-like events from app_lifecycle
         if (events.size < 10) {
+            attempted.add("app_lifecycle")
             val lifecycle = dao.byCollectorSince("app_lifecycle", ninetyDaysAgo)
                 .sortedBy { it.timestamp }
             if (lifecycle.size >= 10) {
+                source = "fallback:app_lifecycle"
                 events = lifecycle.mapNotNull { dp ->
                     when (dp.key) {
                         "app_foreground" -> dp.copy(value = "screen_on")
@@ -475,7 +731,10 @@ class InsightsViewModel @Inject constructor(
             }
         }
 
-        if (events.size < 10) return emptyList()
+        if (events.size < 10) {
+            buildMeta("sleep", source, events.size, events.maxOfOrNull { it.timestamp } ?: 0L, attempted)
+            return emptyList()
+        }
 
         // Build screen-off gaps
         data class Gap(val offTime: Long, val onTime: Long) {
@@ -532,6 +791,8 @@ class InsightsViewModel @Inject constructor(
             }
         }
 
+        buildMeta("sleep", source, events.size, events.maxOfOrNull { it.timestamp } ?: 0L, attempted,
+            staleThresholdMs = 86_400_000L)
         return result
     }
 
@@ -541,6 +802,8 @@ class InsightsViewModel @Inject constructor(
         val now = System.currentTimeMillis()
         val sevenDaysAgo = now - 7 * 86_400_000L
         val fourteenDaysAgo = now - 14 * 86_400_000L
+        val attempted = mutableListOf("usage_stats")
+        var source = "primary"
 
         // Primary: usage_stats
         val recent = dao.byCollectorSince("usage_stats", sevenDaysAgo)
@@ -553,9 +816,11 @@ class InsightsViewModel @Inject constructor(
 
         // Fallback: logcat focus entries as proxy (count × avg_poll_interval as rough ms)
         val effectiveMap = if (currentMap.isEmpty()) {
+            attempted.add("logcat")
             val logcatData = dao.byCollectorSince("logcat", sevenDaysAgo)
                 .filter { it.key.startsWith("focus:") }
             if (logcatData.isNotEmpty()) {
+                source = "fallback:logcat"
                 logcatData.groupBy { it.key.removePrefix("focus:") }
                     .mapValues { (_, entries) ->
                         // Sum launch counts, estimate ~2 min foreground per launch
@@ -570,6 +835,9 @@ class InsightsViewModel @Inject constructor(
             .mapValues { (_, entries) ->
                 entries.mapNotNull { parseForegroundMs(it.value) }.maxOrNull() ?: 0L
             }
+
+        val newestMs = recent.maxOfOrNull { it.timestamp } ?: 0L
+        buildMeta("apps", source, recent.size + effectiveMap.size, newestMs, attempted)
 
         return effectiveMap.entries
             .sortedByDescending { it.value }
@@ -703,6 +971,11 @@ class InsightsViewModel @Inject constructor(
             }
         }
 
+        val allEvents = screenEventsWeek
+        buildMeta("anomalies", if (screenEventsWeek.any { it.collectorId == "app_lifecycle" }) "fallback:app_lifecycle" else "primary",
+            allEvents.size, allEvents.maxOfOrNull { it.timestamp } ?: 0L,
+            listOf("screen_state", "app_lifecycle"))
+
         return anomalies
             .filter { it.id !in dismissed }
             .sortedByDescending { it.timestamp }
@@ -727,7 +1000,10 @@ class InsightsViewModel @Inject constructor(
             }
         }
 
-        if (pairs.isEmpty()) return emptyList()
+        if (pairs.isEmpty()) {
+            buildMeta("location", "primary", 0, 0L, listOf("location"))
+            return emptyList()
+        }
 
         // Grid clustering at ~100m resolution
         data class ClusterData(val grid: String, val lat: Double, val lon: Double, val count: Int)
@@ -740,6 +1016,8 @@ class InsightsViewModel @Inject constructor(
         }.sortedByDescending { it.count }
 
         val clusterNames = prefs.getClusterNames()
+
+        buildMeta("location", "primary", locPoints.size, locPoints.maxOfOrNull { it.timestamp } ?: 0L, listOf("location"))
 
         return clusters.take(20).map { c ->
             LocationCluster(
@@ -771,7 +1049,13 @@ class InsightsViewModel @Inject constructor(
                 .map { it.timestamp }
         }
 
-        if (notifications.isEmpty() || unlocks.isEmpty()) return emptyList()
+        val unlockSource = if (unlocks.isNotEmpty() && dao.byCollectorKeySince("screen_state", "event", sevenDaysAgo).any { it.value == "screen_on" })
+            "primary" else "fallback:app_lifecycle"
+
+        if (notifications.isEmpty() || unlocks.isEmpty()) {
+            buildMeta("unlock", unlockSource, 0, 0L, listOf("screen_state", "notification_listener", "app_lifecycle"))
+            return emptyList()
+        }
 
         // For each notification, find the next unlock within 10 minutes
         val maxLatencyMs = 10 * 60_000L
@@ -790,6 +1074,10 @@ class InsightsViewModel @Inject constructor(
                 }
             }
         }
+
+        val newestNotif = notifications.maxOfOrNull { it.timestamp } ?: 0L
+        buildMeta("unlock", unlockSource, notifications.size + unlocks.size, newestNotif,
+            listOf("screen_state", "notification_listener", "app_lifecycle"))
 
         return latencies.entries
             .filter { it.value.size >= 2 }
@@ -835,6 +1123,11 @@ class InsightsViewModel @Inject constructor(
             }
         }
 
+        buildMeta("fingerprint", "primary", fields.size,
+            fields.mapNotNull { it.lastChangedMs }.maxOrNull() ?: 0L,
+            listOf("build_info", "hardware", "identifiers"),
+            staleThresholdMs = 86_400_000L)
+
         return fields.sortedWith(
             compareByDescending<FingerprintField> { it.lastChangedMs != null }
                 .thenByDescending { it.lastChangedMs ?: 0L }
@@ -859,7 +1152,10 @@ class InsightsViewModel @Inject constructor(
             }
             if (synthesized.size >= 20) screenEvents = synthesized
         }
-        if (screenEvents.size < 20) return emptyList()
+        if (screenEvents.size < 20) {
+            buildMeta("trends", "primary", screenEvents.size, 0L, listOf("screen_state", "app_lifecycle"))
+            return emptyList()
+        }
 
         val stepEvents = dao.byCollectorKeySince("steps", "step_counter_delta", sixMonthsAgo)
 
@@ -922,6 +1218,10 @@ class InsightsViewModel @Inject constructor(
                 avgDailyScreenTimeMs = avgDailyScreenMs,
                 totalSteps = monthSteps
             )
+        }.also {
+            val src = if (screenEvents.firstOrNull()?.collectorId == "screen_state") "primary" else "fallback:app_lifecycle"
+            buildMeta("trends", src, screenEvents.size, screenEvents.maxOfOrNull { it.timestamp } ?: 0L,
+                listOf("screen_state", "app_lifecycle", "steps"), staleThresholdMs = 86_400_000L)
         }
     }
 

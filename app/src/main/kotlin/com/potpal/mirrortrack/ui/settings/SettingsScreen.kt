@@ -105,6 +105,24 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             prefs.setEnabled(collectorId, enabled)
             scheduler.refreshAll()
+            // Backfill: immediately run the collector once when first enabled
+            // so insights populate without waiting for the next poll cycle
+            if (enabled) {
+                val collector = registry.byId(collectorId)
+                if (collector != null) {
+                    try {
+                        if (collector.isAvailable(context)) {
+                            val points = collector.collect(context)
+                            if (points.isNotEmpty()) {
+                                ingestor.submitAll(points)
+                                ingestor.flush()
+                            }
+                        }
+                    } catch (_: Exception) {
+                        // Best-effort; don't fail the toggle
+                    }
+                }
+            }
         }
     }
 
@@ -378,6 +396,15 @@ fun SettingsScreen(
                                         "Failing: ${health.lastError ?: "unknown"} (${health.consecutiveFailures}x)",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                                // Insight dependency hint
+                                val insightCount = com.potpal.mirrortrack.ui.insights.InsightDependencyGraph.cardCountForCollector(collector.id)
+                                if (insightCount > 0) {
+                                    Text(
+                                        "Powers $insightCount insight card${if (insightCount > 1) "s" else ""}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
                                     )
                                 }
                             }

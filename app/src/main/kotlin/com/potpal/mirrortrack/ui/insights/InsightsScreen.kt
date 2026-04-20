@@ -126,6 +126,13 @@ fun InsightsScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { viewModel.toggleDiagnostics() }) {
+                        Icon(
+                            Icons.Default.Speed,
+                            "Toggle diagnostics",
+                            tint = if (state.showDiagnostics) TerminalAmber else DimGray
+                        )
+                    }
                     IconButton(onClick = { viewModel.refresh() }) {
                         Icon(Icons.Default.Refresh, "Refresh", tint = TerminalGreen)
                     }
@@ -152,9 +159,12 @@ fun InsightsScreen(
                     .padding(horizontal = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                val meta = state.cardMeta
+                val diag = state.showDiagnostics
+
                 // Card 1: Today
                 state.today?.let { today ->
-                    item(key = "today") { TodayCard(today) }
+                    item(key = "today") { TodayCard(today, meta["today"], diag) }
                 }
 
                 // Card 2: Sleep heatmap
@@ -163,14 +173,16 @@ fun InsightsScreen(
                         SleepHeatmapCard(
                             days = state.sleepDays,
                             selectedDay = state.selectedSleepDay,
-                            onDaySelected = { viewModel.selectSleepDay(it) }
+                            onDaySelected = { viewModel.selectSleepDay(it) },
+                            meta = meta["sleep"],
+                            showDiagnostics = diag
                         )
                     }
                 }
 
                 // Card 3: App attention
                 if (state.appAttention.isNotEmpty()) {
-                    item(key = "apps") { AppAttentionCard(state.appAttention) }
+                    item(key = "apps") { AppAttentionCard(state.appAttention, meta["apps"], diag) }
                 }
 
                 // Card 4: Anomaly feed
@@ -188,115 +200,117 @@ fun InsightsScreen(
                     item(key = "location") {
                         LocationMapCard(
                             clusters = state.locationClusters,
-                            onRename = { id, name -> viewModel.renameCluster(id, name) }
+                            onRename = { id, name -> viewModel.renameCluster(id, name) },
+                            meta = meta["location"],
+                            showDiagnostics = diag
                         )
                     }
                 }
 
                 // Card 6: Unlock-after-notification
                 if (state.unlockLatencies.isNotEmpty()) {
-                    item(key = "unlock") { UnlockLatencyCard(state.unlockLatencies) }
+                    item(key = "unlock") { UnlockLatencyCard(state.unlockLatencies, meta["unlock"], diag) }
                 }
 
                 // Card 7: Fingerprint stability
                 if (state.fingerprint.isNotEmpty()) {
-                    item(key = "fingerprint") { FingerprintStabilityCard(state.fingerprint) }
+                    item(key = "fingerprint") { FingerprintStabilityCard(state.fingerprint, meta["fingerprint"], diag) }
                 }
 
                 // Card 8: Monthly Trends
                 if (state.monthlyTrends.size >= 2) {
-                    item(key = "trends") { MonthlyTrendsCard(state.monthlyTrends) }
+                    item(key = "trends") { MonthlyTrendsCard(state.monthlyTrends, meta["trends"], diag) }
                 }
 
                 // Card 9: Engagement Score
                 state.engagement?.let { eng ->
-                    item(key = "engagement") { EngagementCard(eng) }
+                    item(key = "engagement") { EngagementCard(eng, meta["engagement"], diag) }
                 }
 
-                // Card 9: Privacy Radar
+                // Card 10: Privacy Radar
                 if (state.privacyRadar.isNotEmpty()) {
-                    item(key = "privacy") { PrivacyRadarCard(state.privacyRadar) }
+                    item(key = "privacy") { PrivacyRadarCard(state.privacyRadar, meta["privacy"], diag) }
                 }
 
-                // Card 10: Data Flow Monitor
+                // Card 11: Data Flow Monitor
                 if (state.dataFlow.isNotEmpty()) {
-                    item(key = "dataflow") { DataFlowCard(state.dataFlow) }
+                    item(key = "dataflow") { DataFlowCard(state.dataFlow, meta["dataflow"], diag) }
                 }
 
-                // Card 11: App Compulsion Index
+                // Card 12: App Compulsion Index
                 if (state.appCompulsion.isNotEmpty()) {
-                    item(key = "compulsion") { AppCompulsionCard(state.appCompulsion) }
+                    item(key = "compulsion") { AppCompulsionCard(state.appCompulsion, meta["compulsion"], diag) }
                 }
 
-                // Card 12: Device Health
+                // Card 13: Device Health
                 state.deviceHealth?.let { health ->
-                    item(key = "health") { DeviceHealthCard(health) }
+                    item(key = "health") { DeviceHealthCard(health, meta["health"], diag) }
                 }
 
-                // Card 13: Identity Entropy
+                // Card 14: Identity Entropy
                 state.identityEntropy?.let { entropy ->
-                    item(key = "entropy") { IdentityEntropyCard(entropy) }
+                    item(key = "entropy") { IdentityEntropyCard(entropy, meta["entropy"], diag) }
                 }
 
-                // Card 14: Home / Work
+                // Card 15: Home / Work
                 state.homeWork?.let { hw ->
-                    item(key = "homework") { HomeWorkCard(hw) }
+                    item(key = "homework") { HomeWorkCard(hw, meta["homework"], diag) }
                 }
 
-                // Card 15: Circadian Profile
+                // Card 16: Circadian Profile
                 state.circadian?.let { circ ->
-                    item(key = "circadian") { CircadianCard(circ) }
+                    item(key = "circadian") { CircadianCard(circ, meta["circadian"], diag) }
                 }
 
-                // Card 16: Routine Predictability
+                // Card 17: Routine Predictability
                 state.routine?.let { rout ->
-                    item(key = "routine") { RoutineCard(rout) }
+                    item(key = "routine") { RoutineCard(rout, meta["routine"], diag) }
                 }
 
-                // Card 17: Social Pressure
+                // Card 18: Social Pressure
                 if (state.socialPressure.isNotEmpty()) {
-                    item(key = "social") { SocialPressureCard(state.socialPressure) }
+                    item(key = "social") { SocialPressureCard(state.socialPressure, meta["social"], diag) }
                 }
 
-                // Card 18: App Portfolio
+                // Card 19: App Portfolio
                 state.appPortfolio?.let { port ->
-                    item(key = "portfolio") { AppPortfolioCard(port) }
+                    item(key = "portfolio") { AppPortfolioCard(port, meta["portfolio"], diag) }
                 }
 
-                // Card 19: Charging Behavior
+                // Card 20: Charging Behavior
                 state.charging?.let { chg ->
-                    item(key = "charging") { ChargingCard(chg) }
+                    item(key = "charging") { ChargingCard(chg, meta["charging"], diag) }
                 }
 
-                // Card 20: WiFi Footprint
+                // Card 21: WiFi Footprint
                 state.wifiFootprint?.let { wifi ->
-                    item(key = "wifi") { WiFiCard(wifi) }
+                    item(key = "wifi") { WiFiCard(wifi, meta["wifi"], diag) }
                 }
 
-                // Card 21: Session Fragmentation
+                // Card 22: Session Fragmentation
                 state.sessionFrag?.let { frag ->
-                    item(key = "fragmentation") { FragmentationCard(frag) }
+                    item(key = "fragmentation") { FragmentationCard(frag, meta["fragmentation"], diag) }
                 }
 
-                // Card 22: Dwell Times
+                // Card 23: Dwell Times
                 if (state.dwellTimes.isNotEmpty()) {
-                    item(key = "dwell") { DwellTimeCard(state.dwellTimes) }
+                    item(key = "dwell") { DwellTimeCard(state.dwellTimes, meta["dwell"], diag) }
                 }
 
-                // Card 23: Weekday vs Weekend
+                // Card 24: Weekday vs Weekend
                 state.weekdayWeekend?.let { wdwe ->
-                    item(key = "weekdayweekend") { WeekdayWeekendCard(wdwe) }
+                    item(key = "weekdayweekend") { WeekdayWeekendCard(wdwe, meta["weekdayweekend"], diag) }
                 }
 
-                // Card 24: Income Inference
+                // Card 25: Income Inference
                 state.income?.let { inc ->
-                    item(key = "income") { IncomeCard(inc) }
+                    item(key = "income") { IncomeCard(inc, meta["income"], diag) }
                 }
 
-                // Card 25: Commute Pattern
+                // Card 26: Commute Pattern
                 state.commute?.let { com ->
                     if (com.detected) {
-                        item(key = "commute") { CommuteCard(com) }
+                        item(key = "commute") { CommuteCard(com, meta["commute"], diag) }
                     }
                 }
 
@@ -330,8 +344,8 @@ private fun SectionLabel(text: String, icon: ImageVector, color: Color) {
 // ── Card 1: Today ────────────────────────────────────────────────────
 
 @Composable
-private fun TodayCard(data: TodayData) {
-    InsightCardShell(title = "Today", icon = Icons.Default.Timeline, accent = TerminalGreen) {
+private fun TodayCard(data: TodayData, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "Today", icon = Icons.Default.Timeline, accent = TerminalGreen, meta = meta, showDiagnostics = showDiagnostics) {
         val stats = listOf(
             Triple(Icons.Default.Storage, "${data.dataPoints}", "data points"),
             Triple(Icons.Default.LockOpen, "${data.unlocks}", "unlocks"),
@@ -382,9 +396,11 @@ private fun StatCell(icon: ImageVector, value: String, label: String) {
 private fun SleepHeatmapCard(
     days: List<SleepDay>,
     selectedDay: SleepDay?,
-    onDaySelected: (SleepDay?) -> Unit
+    onDaySelected: (SleepDay?) -> Unit,
+    meta: InsightMeta? = null,
+    showDiagnostics: Boolean = false
 ) {
-    InsightCardShell(title = "Sleep", icon = Icons.Default.Bed, accent = TerminalPurple) {
+    InsightCardShell(title = "Sleep", icon = Icons.Default.Bed, accent = TerminalPurple, meta = meta, showDiagnostics = showDiagnostics) {
         val dayLabels = listOf("M", "T", "W", "T", "F", "S", "S")
 
         Canvas(
@@ -534,8 +550,8 @@ private fun sleepColor(hours: Double): Color = when {
 // ── Card 3: App attention ────────────────────────────────────────────
 
 @Composable
-private fun AppAttentionCard(apps: List<AppAttention>) {
-    InsightCardShell(title = "App Attention (7d)", icon = Icons.Default.Smartphone, accent = TerminalBlue) {
+private fun AppAttentionCard(apps: List<AppAttention>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "App Attention (7d)", icon = Icons.Default.Smartphone, accent = TerminalBlue, meta = meta, showDiagnostics = showDiagnostics) {
         val maxMs = apps.maxOf { it.foregroundMs7d }.coerceAtLeast(1)
 
         apps.forEachIndexed { i, app ->
@@ -652,11 +668,13 @@ private fun AnomalyCard(anomaly: Anomaly, onDismiss: () -> Unit) {
 @Composable
 private fun LocationMapCard(
     clusters: List<LocationCluster>,
-    onRename: (String, String) -> Unit
+    onRename: (String, String) -> Unit,
+    meta: InsightMeta? = null,
+    showDiagnostics: Boolean = false
 ) {
     var renaming by remember { mutableStateOf<LocationCluster?>(null) }
 
-    InsightCardShell(title = "Location Clusters", icon = Icons.Default.LocationOn, accent = TerminalRed) {
+    InsightCardShell(title = "Location Clusters", icon = Icons.Default.LocationOn, accent = TerminalRed, meta = meta, showDiagnostics = showDiagnostics) {
         if (clusters.size >= 2) {
             val minLat = clusters.minOf { it.lat }
             val maxLat = clusters.maxOf { it.lat }
@@ -810,11 +828,13 @@ private fun LocationMapCard(
 // ── Card 6: Unlock-after-notification ────────────────────────────────
 
 @Composable
-private fun UnlockLatencyCard(latencies: List<UnlockLatency>) {
+private fun UnlockLatencyCard(latencies: List<UnlockLatency>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
     InsightCardShell(
         title = "Unlock After Notification",
         icon = Icons.Default.Notifications,
-        accent = TerminalAmber
+        accent = TerminalAmber,
+        meta = meta,
+        showDiagnostics = showDiagnostics
     ) {
         Text(
             "Median time from notification to screen unlock (7d)",
@@ -871,8 +891,8 @@ private fun UnlockLatencyCard(latencies: List<UnlockLatency>) {
 // ── Card 7: Fingerprint stability ────────────────────────────────────
 
 @Composable
-private fun FingerprintStabilityCard(fields: List<FingerprintField>) {
-    InsightCardShell(title = "Fingerprint Stability", icon = Icons.Default.Fingerprint, accent = TerminalGreen) {
+private fun FingerprintStabilityCard(fields: List<FingerprintField>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "Fingerprint Stability", icon = Icons.Default.Fingerprint, accent = TerminalGreen, meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Device identity fields and when they last changed",
             fontSize = 10.sp,
@@ -930,8 +950,8 @@ private fun FingerprintStabilityCard(fields: List<FingerprintField>) {
 // ── Card 8: Monthly Trends ──────────────────────────────────────
 
 @Composable
-private fun MonthlyTrendsCard(trends: List<MonthlyTrend>) {
-    InsightCardShell(title = "Monthly Trends", icon = Icons.Default.Timeline, accent = TerminalBlue) {
+private fun MonthlyTrendsCard(trends: List<MonthlyTrend>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "Monthly Trends", icon = Icons.Default.Timeline, accent = TerminalBlue, meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Month-over-month behavioral comparison",
             fontSize = 10.sp,
@@ -1009,8 +1029,8 @@ private fun MonthlyTrendsCard(trends: List<MonthlyTrend>) {
 // ── Card 9: Engagement Score ─────────────────────────────────────
 
 @Composable
-private fun EngagementCard(data: EngagementScore) {
-    InsightCardShell(title = "Engagement Score", icon = Icons.Default.Speed, accent = TerminalBlue) {
+private fun EngagementCard(data: EngagementScore, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "Engagement Score", icon = Icons.Default.Speed, accent = TerminalBlue, meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Firebase-style engagement metrics (7d)",
             fontSize = 10.sp,
@@ -1128,8 +1148,8 @@ private fun RetentionBadge(label: String, active: Boolean) {
 // ── Card 9: Privacy Radar ───────────────────────────────────────
 
 @Composable
-private fun PrivacyRadarCard(entries: List<PrivacyRadarEntry>) {
-    InsightCardShell(title = "Privacy Radar", icon = Icons.Default.Shield, accent = TerminalRed) {
+private fun PrivacyRadarCard(entries: List<PrivacyRadarEntry>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "Privacy Radar", icon = Icons.Default.Shield, accent = TerminalRed, meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Per-app privacy invasion score from AppOps audit",
             fontSize = 10.sp,
@@ -1201,8 +1221,8 @@ private fun AccessBadge(label: String, count: Int) {
 // ── Card 10: Data Flow Monitor ──────────────────────────────────
 
 @Composable
-private fun DataFlowCard(entries: List<DataFlowEntry>) {
-    InsightCardShell(title = "Data Flow", icon = Icons.Default.SwapVert, accent = TerminalPurple) {
+private fun DataFlowCard(entries: List<DataFlowEntry>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "Data Flow", icon = Icons.Default.SwapVert, accent = TerminalPurple, meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Per-app network usage (24h) — flagged if TX/RX > 3x",
             fontSize = 10.sp,
@@ -1291,8 +1311,8 @@ private fun DataFlowCard(entries: List<DataFlowEntry>) {
 // ── Card 11: App Compulsion Index ───────────────────────────────
 
 @Composable
-private fun AppCompulsionCard(apps: List<AppCompulsion>) {
-    InsightCardShell(title = "App Compulsion Index", icon = Icons.Default.Repeat, accent = TerminalAmber) {
+private fun AppCompulsionCard(apps: List<AppCompulsion>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "App Compulsion Index", icon = Icons.Default.Repeat, accent = TerminalAmber, meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Most-launched apps by frequency (7d logcat)",
             fontSize = 10.sp,
@@ -1359,8 +1379,8 @@ private fun AppCompulsionCard(apps: List<AppCompulsion>) {
 // ── Card 12: Device Health ──────────────────────────────────────
 
 @Composable
-private fun DeviceHealthCard(health: DeviceHealth) {
-    InsightCardShell(title = "Device Health", icon = Icons.Default.Memory, accent = TerminalGreen) {
+private fun DeviceHealthCard(health: DeviceHealth, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "Device Health", icon = Icons.Default.Memory, accent = TerminalGreen, meta = meta, showDiagnostics = showDiagnostics) {
         // RAM gauge
         val ramColor = when {
             health.ramUsedPct >= 90 -> TerminalRed
@@ -1464,8 +1484,8 @@ private fun DeviceHealthCard(health: DeviceHealth) {
 // ── Card 13: Identity Entropy ───────────────────────────────────
 
 @Composable
-private fun IdentityEntropyCard(entropy: IdentityEntropy) {
-    InsightCardShell(title = "Identity Entropy", icon = Icons.Default.Fingerprint, accent = TerminalPurple) {
+private fun IdentityEntropyCard(entropy: IdentityEntropy, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "Identity Entropy", icon = Icons.Default.Fingerprint, accent = TerminalPurple, meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Fingerprint uniqueness quantified in bits of entropy",
             fontSize = 10.sp,
@@ -1576,8 +1596,8 @@ private fun IdentityEntropyCard(entropy: IdentityEntropy) {
 // ── Card 14: Home / Work ────────────────────────────────────────────
 
 @Composable
-private fun HomeWorkCard(data: HomeWorkInference) {
-    InsightCardShell(title = "Home & Work", icon = Icons.Default.Home, accent = TerminalBlue) {
+private fun HomeWorkCard(data: HomeWorkInference, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "Home & Work", icon = Icons.Default.Home, accent = TerminalBlue, meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Location-based home/work inference from GPS clusters",
             fontSize = 10.sp,
@@ -1661,8 +1681,8 @@ private fun HomeWorkCard(data: HomeWorkInference) {
 // ── Card 15: Circadian Profile ─────────────────────────────────────
 
 @Composable
-private fun CircadianCard(data: CircadianProfile) {
-    InsightCardShell(title = "Circadian Rhythm", icon = Icons.Default.WbSunny, accent = TerminalAmber) {
+private fun CircadianCard(data: CircadianProfile, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "Circadian Rhythm", icon = Icons.Default.WbSunny, accent = TerminalAmber, meta = meta, showDiagnostics = showDiagnostics) {
         val chronoLabel = when (data.chronotype) {
             "early_bird" -> "Early Bird"
             "night_owl" -> "Night Owl"
@@ -1747,8 +1767,8 @@ private fun CircadianCard(data: CircadianProfile) {
 // ── Card 16: Routine Predictability ────────────────────────────────
 
 @Composable
-private fun RoutineCard(data: RoutinePredictability) {
-    InsightCardShell(title = "Routine Predictability", icon = Icons.Default.Schedule, accent = TerminalGreen) {
+private fun RoutineCard(data: RoutinePredictability, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "Routine Predictability", icon = Icons.Default.Schedule, accent = TerminalGreen, meta = meta, showDiagnostics = showDiagnostics) {
         val pctScore = (data.overallScore * 100).toInt()
         val routineLabel = when {
             pctScore >= 80 -> "Clockwork"
@@ -1827,8 +1847,8 @@ private fun RoutineCard(data: RoutinePredictability) {
 // ── Card 17: Social Pressure ───────────────────────────────────────
 
 @Composable
-private fun SocialPressureCard(entries: List<SocialPressureEntry>) {
-    InsightCardShell(title = "Social Pressure", icon = Icons.Default.Notifications, accent = TerminalRed) {
+private fun SocialPressureCard(entries: List<SocialPressureEntry>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "Social Pressure", icon = Icons.Default.Notifications, accent = TerminalRed, meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Apps that trigger the fastest phone pickups",
             fontSize = 10.sp,
@@ -1892,8 +1912,8 @@ private fun SocialPressureCard(entries: List<SocialPressureEntry>) {
 // ── Card 18: App Portfolio ─────────────────────────────────────────
 
 @Composable
-private fun AppPortfolioCard(data: AppPortfolioProfile) {
-    InsightCardShell(title = "App Portfolio", icon = Icons.Default.Apps, accent = TerminalPurple) {
+private fun AppPortfolioCard(data: AppPortfolioProfile, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "App Portfolio", icon = Icons.Default.Apps, accent = TerminalPurple, meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Installed app analysis and demographic inference",
             fontSize = 10.sp,
@@ -1974,8 +1994,8 @@ private fun AppPortfolioCard(data: AppPortfolioProfile) {
 // ── Card 19: Charging Behavior ─────────────────────────────────────
 
 @Composable
-private fun ChargingCard(data: ChargingBehavior) {
-    InsightCardShell(title = "Charging Behavior", icon = Icons.Default.BatteryChargingFull, accent = TerminalGreen) {
+private fun ChargingCard(data: ChargingBehavior, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "Charging Behavior", icon = Icons.Default.BatteryChargingFull, accent = TerminalGreen, meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Battery charging patterns and habits",
             fontSize = 10.sp,
@@ -2049,8 +2069,8 @@ private fun ChargingCard(data: ChargingBehavior) {
 // ── Card 20: WiFi Footprint ────────────────────────────────────────
 
 @Composable
-private fun WiFiCard(data: WiFiFootprint) {
-    InsightCardShell(title = "WiFi Footprint", icon = Icons.Default.Wifi, accent = TerminalBlue) {
+private fun WiFiCard(data: WiFiFootprint, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "WiFi Footprint", icon = Icons.Default.Wifi, accent = TerminalBlue, meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Network mobility and location inference via WiFi",
             fontSize = 10.sp,
@@ -2147,8 +2167,8 @@ private fun WiFiCard(data: WiFiFootprint) {
 // ── Card 21: Session Fragmentation ─────────────────────────────────
 
 @Composable
-private fun FragmentationCard(data: SessionFragmentation) {
-    InsightCardShell(title = "Session Fragmentation", icon = Icons.Default.DataUsage, accent = TerminalAmber) {
+private fun FragmentationCard(data: SessionFragmentation, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "Session Fragmentation", icon = Icons.Default.DataUsage, accent = TerminalAmber, meta = meta, showDiagnostics = showDiagnostics) {
         val attentionLabel = when {
             data.attentionScore >= 0.8 -> "Deep focus"
             data.attentionScore >= 0.6 -> "Moderate focus"
@@ -2231,8 +2251,8 @@ private fun FragmentationCard(data: SessionFragmentation) {
 // ── Card 22: Dwell Times ───────────────────────────────────────────
 
 @Composable
-private fun DwellTimeCard(entries: List<DwellTimeEntry>) {
-    InsightCardShell(title = "Dwell Times", icon = Icons.Default.Place, accent = TerminalPurple) {
+private fun DwellTimeCard(entries: List<DwellTimeEntry>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "Dwell Times", icon = Icons.Default.Place, accent = TerminalPurple, meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Time spent at each location cluster",
             fontSize = 10.sp,
@@ -2317,8 +2337,8 @@ private fun DwellTimeCard(entries: List<DwellTimeEntry>) {
 // ── Card 23: Weekday vs Weekend ────────────────────────────────────
 
 @Composable
-private fun WeekdayWeekendCard(data: WeekdayWeekendDelta) {
-    InsightCardShell(title = "Weekday vs Weekend", icon = Icons.Default.CalendarMonth, accent = TerminalBlue) {
+private fun WeekdayWeekendCard(data: WeekdayWeekendDelta, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "Weekday vs Weekend", icon = Icons.Default.CalendarMonth, accent = TerminalBlue, meta = meta, showDiagnostics = showDiagnostics) {
         val balanceLabel = when {
             data.balanceScore >= 0.8 -> "Very different"
             data.balanceScore >= 0.5 -> "Noticeably different"
@@ -2395,8 +2415,8 @@ private fun WeekdayWeekendCard(data: WeekdayWeekendDelta) {
 // ── Card 24: Income Inference ──────────────────────────────────────
 
 @Composable
-private fun IncomeCard(data: IncomeInference) {
-    InsightCardShell(title = "Income Inference", icon = Icons.Default.AttachMoney, accent = TerminalAmber) {
+private fun IncomeCard(data: IncomeInference, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "Income Inference", icon = Icons.Default.AttachMoney, accent = TerminalAmber, meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Socioeconomic signals from device + apps + carrier",
             fontSize = 10.sp,
@@ -2463,8 +2483,8 @@ private fun IncomeCard(data: IncomeInference) {
 // ── Card 25: Commute Pattern ───────────────────────────────────────
 
 @Composable
-private fun CommuteCard(data: CommutePattern) {
-    InsightCardShell(title = "Commute Pattern", icon = Icons.Default.DirectionsCar, accent = TerminalBlue) {
+private fun CommuteCard(data: CommutePattern, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "Commute Pattern", icon = Icons.Default.DirectionsCar, accent = TerminalBlue, meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Daily commute inference from location transitions",
             fontSize = 10.sp,
@@ -2533,6 +2553,8 @@ private fun InsightCardShell(
     title: String,
     icon: ImageVector,
     accent: Color,
+    meta: InsightMeta? = null,
+    showDiagnostics: Boolean = false,
     content: @Composable () -> Unit
 ) {
     Card(
@@ -2556,7 +2578,98 @@ private fun InsightCardShell(
                     title,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
+                // Confidence + staleness badges
+                if (meta != null) {
+                    if (meta.isStale) {
+                        Text(
+                            "STALE",
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = TerminalAmber,
+                            modifier = Modifier
+                                .background(TerminalAmber.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    when (meta.confidence) {
+                        ConfidenceTier.LOW -> {
+                            Text(
+                                "LOW",
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = TerminalRed.copy(alpha = 0.8f),
+                                modifier = Modifier
+                                    .background(TerminalRed.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                            )
+                        }
+                        ConfidenceTier.MODERATE -> {
+                            Text(
+                                "MED",
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = TerminalAmber.copy(alpha = 0.8f),
+                                modifier = Modifier
+                                    .background(TerminalAmber.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                            )
+                        }
+                        ConfidenceTier.HIGH -> { /* no badge for high confidence */ }
+                    }
+                }
+            }
+            // Data source + diagnostic info
+            if (meta != null && showDiagnostics) {
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "src: ${meta.dataSource}",
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = DimGray
+                    )
+                    Text(
+                        "${meta.dataPointCount} pts",
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = DimGray
+                    )
+                    if (meta.newestDataMs > 0) {
+                        Text(
+                            meta.ageLabel,
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = if (meta.isStale) TerminalAmber else DimGray
+                        )
+                    }
+                }
+                if (meta.attempted.size > 1) {
+                    Text(
+                        "tried: ${meta.attempted.joinToString(" > ")}",
+                        fontSize = 8.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = DimGray.copy(alpha = 0.7f)
+                    )
+                }
+            }
+            // Limited data warning
+            if (meta != null && meta.confidence == ConfidenceTier.LOW && !showDiagnostics) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "Based on limited data" + if (meta.dataSource.startsWith("fallback")) " (${meta.dataSource.removePrefix("fallback:")})" else "",
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = DimGray
                 )
             }
             Spacer(Modifier.height(12.dp))
