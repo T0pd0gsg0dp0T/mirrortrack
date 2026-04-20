@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Prevent the encrypted DB, the salt, and any collector state from being
+backed up to Google Drive auto-backup or extracted via adb backup.
+
+android:allowBackup is already false in the manifest, which is belt-and-
+suspenders with this file. Belt-and-suspenders is correct for a local-only
+surveillance mirror.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+        <exclude domain="root" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+        <exclude domain="root" />
+    </device-transfer>
+</data-extraction-rules>

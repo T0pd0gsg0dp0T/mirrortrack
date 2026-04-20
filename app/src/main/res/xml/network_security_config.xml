@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Network access policy.
+
+By default: cleartext blocked everywhere. The only collector that makes any
+outbound request is the public-IP lookup (IpCollector, if/when wired). That
+endpoint must be HTTPS and should be pinnable.
+
+If a future collector needs additional domains, list them explicitly below
+and update CLAUDE.md rule #1. Every addition should be reviewed as a policy
+change, not a bugfix.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- Uncomment and add pins when IpCollector is wired.
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">api.ipify.org</domain>
+        <pin-set>
+            <pin digest="SHA-256">...</pin>
+        </pin-set>
+    </domain-config>
+    -->
+</network-security-config>

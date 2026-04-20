@@ -1,0 +1,622 @@
+{
+  "project": "MirrorTrack",
+  "branchName": "ralph/mirrortrack-v1",
+  "description": "Local Android self-surveillance app: collects the categories trackers harvest, stores only in SQLCipher, zero network egress of collected data. Build on top of existing scaffold (Collector interface, Ingestor, MirrorDatabase, CryptoManager, 2 reference collectors already wired).",
+  "context": {
+    "scaffold": "Assume the scaffold at mirrortrack-scaffold.tar.gz is already extracted and committed. Read CLAUDE.md before starting any story.",
+    "stack": "Kotlin 2.1, AGP 8.7, Compose BOM 2024.11, Room 2.6.1, SQLCipher 4.6.1, Hilt 2.52, Argon2kt 1.6",
+    "rules": [
+      "No Google Play Services artifacts.",
+      "INTERNET permission consumed only by US-033 (IpCollector). Any other network use is a rejected PR.",
+      "New collectors ship with defaultEnabled = false.",
+      "No android.util.Log in non-DEBUG code paths.",
+      "Passphrases are CharArray, not String; zeroed after use.",
+      "Every collector registered in CollectorRegistryModule.provideCollectors explicitly (no @IntoSet)."
+    ],
+    "globalAcceptanceCriteria": [
+      "Typecheck passes",
+      "./gradlew :app:assembleDebug succeeds",
+      "./gradlew :app:lintDebug produces no new errors",
+      "No new INTERNET traffic unless story is US-033"
+    ]
+  },
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Unlock flow: passphrase → Argon2id → DB open",
+      "description": "As the device owner, I want to unlock the app with my passphrase so that the encrypted DB is opened and collectors can write to it.",
+      "acceptanceCriteria": [
+        "UnlockScreen (Compose) with masked passphrase field + Unlock button + first-run 'create passphrase' confirm field.",
+        "UnlockViewModel (Hilt) calls CryptoManager.deriveKey(CharArray), passes rawKey to DatabaseHolder.open(), catches SQLiteException on wrong key and shows 'incorrect passphrase'.",
+        "Passphrase CharArray is zeroed in the ViewModel within 100ms of deriveKey return.",
+        "On success, NavHost routes to the LiveFeed destination; on failure, field is cleared and focus returns.",
+        "Typecheck passes; ./gradlew :app:assembleDebug succeeds."
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "App shell: NavHost with unlock-gated routes",
+      "description": "As the device owner, I want a single-activity navigation host so that I can move between Unlock, LiveFeed, CategoryBrowser, and Settings.",
+      "acceptanceCriteria": [
+        "NavHost with routes: unlock, feed, categories, category/{id}, datapoint/{rowId}, settings, permissions.",
+        "Start destination = unlock if DatabaseHolder.isOpen() is false, else feed.",
+        "BackHandler on feed prompts before exiting to unlock (which closes DB).",
+        "Material 3 scaffold with bottom nav (Feed, Categories, Settings) visible only post-unlock.",
+        "Typecheck passes; app launches, unlocks, shows feed placeholder."
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "LiveFeedScreen: observe recent DataPoints",
+      "description": "As the device owner, I want a reverse-chronological live feed of collected DataPoints so that I can see what is being recorded in real time.",
+      "acceptanceCriteria": [
+        "LiveFeedScreen observes dao.observeRecent(500) via collectAsStateWithLifecycle.",
+        "Each row shows: relative timestamp, category icon, collectorId, key, truncated value (40 chars).",
+        "Tapping a row navigates to datapoint/{rowId} detail route.",
+        "Empty state: 'No data yet. Enable collectors in Settings.'",
+        "LazyColumn with keys = rowId; no visible jank at 1000+ rows.",
+        "Typecheck passes."
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "PermissionsScreen: runtime permission request helper",
+      "description": "As the device owner, I want a dedicated screen that explains and requests Android runtime permissions so that I can grant only what I want.",
+      "acceptanceCriteria": [
+        "Screen lists every RUNTIME-tier permission referenced by any registered Collector with its rationale string.",
+        "Per-permission toggle uses rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission).",
+        "Denied-twice state shows a 'Open app settings' link via Intent.ACTION_APPLICATION_DETAILS_SETTINGS.",
+        "Shows current grant state live (recomposes on resume).",
+        "Does NOT request permissions the user hasn't enabled a collector for.",
+        "Typecheck passes."
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "CollectionForegroundService with dignified notification",
+      "description": "As the device owner, I want a foreground service so that collection continues in the background without being killed by Android's Doze.",
+      "acceptanceCriteria": [
+        "Service class declared in manifest with foregroundServiceType=specialUse (already in manifest).",
+        "Builds NotificationChannel IMPORTANCE_LOW with description from strings.xml.",
+        "Notification text uses format '{N} streams · {M} points today' updated every 60s.",
+        "Service.startIfEnabled(context) static method checks DataStore flag before starting.",
+        "onStartCommand returns START_STICKY.",
+        "Tapping notification opens MainActivity.",
+        "Service respects DatabaseHolder lock state — does not invoke collectors if DB closed.",
+        "Typecheck passes; service visible in adb shell dumpsys activity services."
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "CollectionScheduler: WorkManager driver for polled collectors",
+      "description": "As the device owner, I want polled collectors to run at their configured cadence so that device state is sampled over time.",
+      "acceptanceCriteria": [
+        "HiltWorker class PolledCollectionWorker reads CollectorRegistry.all(), filters isEnabled && defaultPollInterval != null && isAvailable(context), calls collect(), submits to Ingestor.",
+        "One PeriodicWorkRequest scheduled per collector, named by collectorId, with ExistingPeriodicWorkPolicy.UPDATE, interval = collector's configured pollInterval (default or user override from DataStore).",
+        "Scheduler.refreshAll() rebuilds the queue when user toggles collectors.",
+        "Worker catches and logs per-collector exceptions without killing the batch.",
+        "Minimum interval clamped to 15 min per WorkManager contract; collectors needing faster cadence must be streamed.",
+        "Typecheck passes; BuildInfoCollector writes to DB on first scheduled run."
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Streamed collector runtime in ForegroundService",
+      "description": "As the device owner, I want streamed collectors (screen state, sensors) to emit continuously so that event-driven data is captured.",
+      "acceptanceCriteria": [
+        "CollectionForegroundService holds a SupervisorJob scope; launches one coroutine per enabled streamed collector.",
+        "Each coroutine collects collector.stream(context) and forwards to Ingestor.submit.",
+        "Collector enable/disable toggles (re)launch or cancel the matching coroutine within 2 seconds.",
+        "On service destroy, scope.cancel() runs awaitClose in every callbackFlow and unregisters receivers.",
+        "ScreenStateCollector produces DataPoints visible in LiveFeed on screen on/off.",
+        "Typecheck passes."
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "CategoryBrowser + DataPointDetail",
+      "description": "As the device owner, I want to drill into a category and then a specific DataPoint so that I can inspect what was collected.",
+      "acceptanceCriteria": [
+        "CategoryBrowser lists Category.values() with row count per category (dao.countByCollector aggregated).",
+        "Tapping a category shows all DataPoints for that category, grouped by collector, newest first, paginated at 200.",
+        "DataPointDetail shows full row: absolute timestamp, collectorId, category, key, full value (scrollable), valueType.",
+        "JSON valueType values are pretty-printed with kotlinx.serialization.json.Json { prettyPrint = true }.",
+        "Typecheck passes."
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Per-collector settings screen (enable, pollInterval override)",
+      "description": "As the device owner, I want to toggle each collector on/off and adjust its poll interval so that I control what is collected and how often.",
+      "acceptanceCriteria": [
+        "SettingsScreen lists every collector grouped by Category with: toggle switch, rationale, current state (available/needs-permission/running).",
+        "Long-press on polled collector reveals pollInterval slider (15m, 1h, 6h, 24h presets).",
+        "State stored in DataStore under keys collector.<id>.enabled and collector.<id>.pollIntervalMinutes.",
+        "Toggling enabled=true for a RUNTIME-tier collector that lacks permission triggers PermissionsScreen.",
+        "Toggling enabled=false cancels any active stream job within 2 seconds.",
+        "Scheduler.refreshAll() called on every toggle change.",
+        "Typecheck passes."
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "RetentionPolicy + periodic purge worker",
+      "description": "As the device owner, I want per-collector TTL so that high-frequency sensor data doesn't fill the DB indefinitely.",
+      "acceptanceCriteria": [
+        "Collector interface gains `val defaultRetention: Duration? get() = null` (null = keep forever).",
+        "BuildInfoCollector defaultRetention = 365.days; ScreenStateCollector defaultRetention = 90.days; sensor collectors (future) default 7.days.",
+        "RetentionWorker (PeriodicWorkRequest, 24h) iterates CollectorRegistry.all(), calls dao.purgeOlderThan(id, now - ttl).",
+        "Per-collector TTL overridable in Settings via DataStore.",
+        "Worker logs total rows purged to logcat in DEBUG; silent in release.",
+        "Typecheck passes."
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "BatteryCollector (hybrid: sticky broadcast + interval)",
+      "description": "As the device owner, I want battery level/state/temp collected continuously so that I have the same signal trackers use for device health fingerprinting.",
+      "acceptanceCriteria": [
+        "Hybrid: stream() subscribes to ACTION_BATTERY_CHANGED sticky; also polls every 5 min as a fallback.",
+        "Emits DataPoints for: level (0–100), scale, is_charging, charge_plug, status, health, temperature_tenths_c, voltage_mv, technology.",
+        "Registered in CollectorRegistryModule.",
+        "defaultEnabled = true (zero-risk, no permission).",
+        "DataPoints visible in LiveFeed when user plugs/unplugs charger.",
+        "Typecheck passes."
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "IntegrityCollector (root, emulator, debugger heuristics)",
+      "description": "As the device owner, I want the same device-integrity signals trackers compute so that I can see my own device's profile.",
+      "acceptanceCriteria": [
+        "Polled, 24h cadence.",
+        "Emits: rooted_heuristic (bool), su_binary_present (bool), test_keys (bool from Build.TAGS), emulator_heuristic (bool from Build.FINGERPRINT/HARDWARE/PRODUCT), debugger_attached (bool from Debug.isDebuggerConnected), adb_enabled (bool from Settings.Global.ADB_ENABLED), developer_options (bool), play_integrity_attestation (string or 'unavailable').",
+        "Play Integrity call is best-effort and does NOT add play-services-* to deps (use raw IntegrityManager if available via compileOnly, else emit 'unavailable').",
+        "No play-services-* artifact added.",
+        "Typecheck passes; new entries appear in LiveFeed after first poll."
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "IdentifiersCollector (ANDROID_ID, install UUID, GAID if any)",
+      "description": "As the device owner, I want the persistent identifiers trackers key off of so that I can see my fingerprint.",
+      "acceptanceCriteria": [
+        "Polled, 24h cadence.",
+        "Emits: android_id (Settings.Secure.ANDROID_ID, scoped to our signing key — note this in rationale), install_uuid (generated on first run, stored in DataStore, stable for life of install), first_install_time (from PackageManager), last_update_time, package_signing_sha256 (hex of first signer cert).",
+        "GAID intentionally NOT collected unless user explicitly enables a sub-toggle (it requires Play Services and Google is deprecating it).",
+        "Rationale string explicitly calls out that ANDROID_ID is per-signing-key scoped.",
+        "Typecheck passes."
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "HardwareCollector (RAM, storage, CPU, display)",
+      "description": "As the device owner, I want hardware characteristics recorded so that I see the same device-fingerprint trackers compile.",
+      "acceptanceCriteria": [
+        "Polled, 24h cadence.",
+        "Emits: total_ram_bytes, available_ram_bytes (ActivityManager.MemoryInfo), total_storage_bytes, available_storage_bytes (StatFs on internal), cpu_abi_list (json), cpu_core_count, screen_width_px, screen_height_px, density_dpi, refresh_rate_hz, font_scale, hdr_capabilities (json), dark_mode (bool from Configuration.uiMode).",
+        "No permission required.",
+        "Typecheck passes."
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "MotionSensorCollector (accel, gyro, mag)",
+      "description": "As the device owner, I want periodic motion-sensor snapshots so that I capture what movement-based fingerprinting sees.",
+      "acceptanceCriteria": [
+        "Streamed. Subscribes at SENSOR_DELAY_NORMAL (~5Hz) but internally downsamples to 1Hz before emitting (batching timer).",
+        "Emits per-sample DataPoints for: accel_x/y/z, gyro_x/y/z, mag_x/y/z.",
+        "Only subscribes if the sensor is present (SensorManager.getDefaultSensor != null).",
+        "Unregisters on Flow cancellation.",
+        "No permission required for these sensors.",
+        "Typecheck passes."
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "EnvironmentSensorCollector (light, proximity, pressure, temp)",
+      "description": "As the device owner, I want environment sensor snapshots so that ambient-context signals are recorded.",
+      "acceptanceCriteria": [
+        "Streamed, downsampled to 0.2Hz (one sample per 5s).",
+        "Emits: ambient_light_lux, proximity_cm, barometric_pressure_hpa, ambient_temperature_c when those sensors exist.",
+        "Gracefully degrades: emits nothing for absent sensors rather than throwing.",
+        "Typecheck passes."
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "StepCollector (Sensor.TYPE_STEP_COUNTER + STEP_DETECTOR)",
+      "description": "As the device owner, I want step counts logged so that I see activity-level signals.",
+      "acceptanceCriteria": [
+        "Streamed. STEP_COUNTER is cumulative since boot — emit delta since last sample, not raw counter.",
+        "STEP_DETECTOR emits one DataPoint per detected step event.",
+        "Requires ACTIVITY_RECOGNITION on A10+. Collector's accessTier = RUNTIME.",
+        "Handles reboot (counter resets) by detecting decrease and emitting reset marker.",
+        "Typecheck passes."
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "ConnectivityCollector",
+      "description": "As the device owner, I want connection type and transport changes recorded so that network fingerprint shifts are tracked.",
+      "acceptanceCriteria": [
+        "Hybrid: polled 5m cadence + ConnectivityManager.NetworkCallback for change events.",
+        "Emits: active_transport (wifi/cellular/ethernet/vpn/none), is_metered, is_validated, link_downstream_kbps, link_upstream_kbps, vpn_active (bool).",
+        "Uses ACCESS_NETWORK_STATE (already in manifest, no runtime prompt).",
+        "Typecheck passes."
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "CarrierCollector",
+      "description": "As the device owner, I want carrier/SIM fingerprint data captured so that regional signals trackers read are mirrored.",
+      "acceptanceCriteria": [
+        "Polled 24h.",
+        "Emits: carrier_name, mcc, mnc, sim_country_iso, sim_operator, network_country_iso, network_operator, phone_type, is_roaming.",
+        "Gracefully handles devices without telephony hardware (emits 'unavailable').",
+        "No READ_PHONE_STATE needed for these specific fields on modern APIs.",
+        "Typecheck passes."
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "AppLifecycleCollector (our own app sessions)",
+      "description": "As the device owner, I want our app's own lifecycle recorded so that session-tracking-SDK behavior is mirrored for our app.",
+      "acceptanceCriteria": [
+        "Streamed. Uses ProcessLifecycleOwner to detect app_foreground / app_background.",
+        "Emits session_start (foreground) with session_uuid, session_end (background) with duration_ms.",
+        "Session UUID persists across brief backgrounds (<5s) to match typical SDK behavior.",
+        "Typecheck passes."
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "WifiCollector (SSID, BSSID, RSSI, scan results)",
+      "description": "As the device owner, I want wifi environment captured so that location-adjacent fingerprinting is mirrored.",
+      "acceptanceCriteria": [
+        "accessTier = RUNTIME. Requires ACCESS_FINE_LOCATION on A9+ for SSID/BSSID; NEARBY_WIFI_DEVICES on A13+ for scan without location.",
+        "Polled 15m cadence.",
+        "Emits current_ssid, current_bssid, current_rssi_dbm, current_link_speed_mbps, current_frequency_mhz.",
+        "Scan result list emitted as JSON array per row: [{ssid, bssid, rssi, frequency, capabilities}, ...].",
+        "isAvailable returns false when permission missing; collector appears disabled in UI.",
+        "Typecheck passes."
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "LocationCollector (raw LocationManager, no FusedLocationProvider)",
+      "description": "As the device owner, I want GPS/network-fix locations so that geolocation signal is mirrored — without Google Play Services.",
+      "acceptanceCriteria": [
+        "Uses android.location.LocationManager directly. No play-services-location dependency.",
+        "accessTier = RUNTIME. Requires ACCESS_FINE_LOCATION.",
+        "Streamed. Subscribes to GPS_PROVIDER + NETWORK_PROVIDER with 5-minute min-time / 50m min-distance.",
+        "Emits: lat, lon, altitude_m, accuracy_m, bearing_deg, speed_mps, provider, is_mock.",
+        "Handles LocationManager.PASSIVE_PROVIDER for opportunistic sampling.",
+        "Background location (ACCESS_BACKGROUND_LOCATION) requested only if user explicitly enables background collection in Settings.",
+        "Typecheck passes."
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "ActivityRecognitionCollector (manual HAR from accel)",
+      "description": "As the device owner, I want activity classification (walking/still/driving) without Play Services.",
+      "acceptanceCriteria": [
+        "Since ActivityRecognitionClient lives in play-services, implement a lightweight rule-based classifier over the last 30s of MotionSensorCollector data.",
+        "Emits: activity (still/walking/running/vehicle/unknown), confidence_estimate (0–1).",
+        "Classifier is a simple heuristic: RMS of accel magnitude → state; documented in class header with explicit 'this is a toy classifier, not ML'.",
+        "accessTier = RUNTIME (ACTIVITY_RECOGNITION permission).",
+        "Typecheck passes."
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-024",
+      "title": "BodySensorsCollector (heart rate if hardware present)",
+      "description": "As the device owner, I want heart rate samples when the device has the sensor.",
+      "acceptanceCriteria": [
+        "Streamed at 0.1Hz (every 10s).",
+        "Subscribes to Sensor.TYPE_HEART_RATE if present.",
+        "accessTier = RUNTIME (BODY_SENSORS permission).",
+        "isAvailable returns false on phones without heart rate hardware.",
+        "Emits: heart_rate_bpm, accuracy_level.",
+        "Typecheck passes."
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-025",
+      "title": "BluetoothCollector (paired + scan)",
+      "description": "As the device owner, I want nearby and paired Bluetooth device fingerprints recorded.",
+      "acceptanceCriteria": [
+        "accessTier = RUNTIME. BLUETOOTH_SCAN + BLUETOOTH_CONNECT on A12+.",
+        "Polled 30m cadence.",
+        "Emits paired_devices JSON list (name, address_per_app_random, type, bond_state) + scan_results JSON list (address, rssi, name_if_any) from a 10s LE scan.",
+        "Scan uses neverForLocation flag; no location permission triggered.",
+        "Stops scan on collector disable.",
+        "Typecheck passes."
+      ],
+      "priority": 25,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-026",
+      "title": "ContactsCollector (hashed + full toggle)",
+      "description": "As the device owner, I want contact-list fingerprint captured in either hashed-count or full mode.",
+      "acceptanceCriteria": [
+        "accessTier = RUNTIME. READ_CONTACTS.",
+        "Two sub-modes in settings: 'count + hashed set' (default) and 'full dump'.",
+        "Hashed mode: emits contact_count, unique_hashed_phones_count, unique_hashed_emails_count — hash = SHA256 of normalized value.",
+        "Full mode: emits one DataPoint per contact with {name, phones[], emails[], starred, times_contacted, last_contacted}.",
+        "Polled 24h.",
+        "Typecheck passes."
+      ],
+      "priority": 26,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-027",
+      "title": "CalendarCollector",
+      "description": "As the device owner, I want calendar events recorded.",
+      "acceptanceCriteria": [
+        "accessTier = RUNTIME. READ_CALENDAR.",
+        "Polled 6h.",
+        "Emits, per event in the next ±30 days: calendar_account, title, location, start_ms, end_ms, all_day, attendee_count, organizer_email.",
+        "One DataPoint per event, keyed by event_id.",
+        "Typecheck passes."
+      ],
+      "priority": 27,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-028",
+      "title": "MediaExifCollector",
+      "description": "As the device owner, I want EXIF from photos captured so that I see what media-library trackers read.",
+      "acceptanceCriteria": [
+        "accessTier = RUNTIME. READ_MEDIA_IMAGES (A13+) / READ_EXTERNAL_STORAGE (older).",
+        "Polled 24h. Processes only photos created since last run (watermark in DataStore).",
+        "Emits per image: media_id, date_taken, mime_type, width, height, size_bytes, exif_gps_lat, exif_gps_lon, exif_camera_make, exif_camera_model, exif_software, exif_iso, exif_exposure_time.",
+        "Uses ExifInterface via content resolver InputStream; does NOT copy full image.",
+        "Typecheck passes."
+      ],
+      "priority": 28,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-029",
+      "title": "UsageStatsCollector with onboarding deep-link",
+      "description": "As the device owner, I want per-app foreground time captured so that I mirror the behavioral signal session SDKs compute.",
+      "acceptanceCriteria": [
+        "accessTier = SPECIAL_ACCESS. PACKAGE_USAGE_STATS.",
+        "Onboarding screen explains the permission and deep-links to Settings.ACTION_USAGE_ACCESS_SETTINGS.",
+        "Polled 1h cadence. Emits per-package DataPoints: total_foreground_ms, last_used_ms, launch_count, first_timestamp, app_standby_bucket.",
+        "isAvailable returns false when AppOpsManager.checkOpNoThrow(OPSTR_GET_USAGE_STATS) != MODE_ALLOWED.",
+        "Typecheck passes."
+      ],
+      "priority": 29,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-030",
+      "title": "NotificationListenerCollector",
+      "description": "As the device owner, I want posted-notification metadata captured so that I see what NLS-based trackers see.",
+      "acceptanceCriteria": [
+        "accessTier = SPECIAL_ACCESS. BIND_NOTIFICATION_LISTENER_SERVICE.",
+        "Onboarding screen deep-links to Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS.",
+        "MirrorNotificationListenerService emits on onNotificationPosted: package, post_time, category, priority, title_present (bool), text_present (bool), action_count.",
+        "Default mode records metadata only, NOT title/text body. A settings toggle 'record notification contents' enables full body capture with a scary red warning.",
+        "isAvailable checks NotificationManagerCompat.getEnabledListenerPackages().",
+        "Typecheck passes."
+      ],
+      "priority": 30,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-031",
+      "title": "PrivacyDashboardCollector (A12+ PermissionManager.getPermissionUsages)",
+      "description": "As the device owner, I want to see which other apps recently accessed sensors/camera/location so that I audit their behavior from within this app.",
+      "acceptanceCriteria": [
+        "accessTier = NONE on A12+; unavailable on A11 and below.",
+        "Polled 6h cadence.",
+        "Calls PermissionManager.getPermissionUsages via reflection (API is @SystemApi on some paths — handle missing gracefully).",
+        "Emits per (package, permission_group) pair: last_access_ms, access_count_7d.",
+        "Typecheck passes; falls back gracefully on A11."
+      ],
+      "priority": 31,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-032",
+      "title": "InstalledAppsCollector",
+      "description": "As the device owner, I want the full installed-app list so that I mirror what QUERY_ALL_PACKAGES trackers enumerate.",
+      "acceptanceCriteria": [
+        "accessTier = RESTRICTED (Play Store policy flag). QUERY_ALL_PACKAGES.",
+        "Polled 24h.",
+        "Emits per package: package_name, version_name, version_code, install_time, update_time, install_source, signing_sha256, permissions_requested (json), permissions_granted (json), is_system, enabled.",
+        "Warning shown in Settings on first enable: 'This permission is Play Store restricted. If you plan to publish to Play Store, this permission requires justification.'",
+        "Typecheck passes."
+      ],
+      "priority": 32,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-033",
+      "title": "IpCollector (the one audited network-egress collector)",
+      "description": "As the device owner, I want my public IP recorded so that my external-facing network fingerprint is mirrored.",
+      "acceptanceCriteria": [
+        "Polled 1h cadence. defaultEnabled = false.",
+        "HTTP GET to a configurable endpoint (default https://api.ipify.org?format=text) using HttpURLConnection; NO OkHttp / Retrofit / Ktor.",
+        "Timeout 5s connect / 5s read.",
+        "Emits: public_ip_v4 (or v6), lookup_endpoint, lookup_status_code.",
+        "Rationale string explicitly calls out: 'This is the only collector that makes any outbound network request. Disable if you want true zero egress.'",
+        "Network call routed through the app's own VPN-less HTTP — logged to logcat in DEBUG so the user can see it happen.",
+        "Typecheck passes."
+      ],
+      "priority": 33,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-034",
+      "title": "ExportManager (encrypted tarball with KDF params manifest)",
+      "description": "As the device owner, I want to export the DB for desktop analysis without losing the ability to decrypt it later.",
+      "acceptanceCriteria": [
+        "Export writes a .tar.gz to a user-chosen Storage Access Framework URI containing: mirrortrack.db (SQLCipher bytes), salt.bin (16 bytes), manifest.json ({kdf:'argon2id', t:int, m:int, p:int, app_version_code:int, export_ts_ms:long}).",
+        "Ingestor.flush() called before export so no pending rows are missed.",
+        "manifest.json's kdf params MUST match CryptoManager current constants; if they ever diverge, CryptoManager reads the manifest to re-derive on the desktop side.",
+        "Desktop decrypt.py is updated to read manifest.json instead of hardcoding params (update desktop-analysis/decrypt.py).",
+        "Typecheck passes."
+      ],
+      "priority": 34,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-035",
+      "title": "Panic wipe (panic PIN silently purges DB)",
+      "description": "As the device owner, I want a panic PIN that silently wipes the DB rather than unlocking it.",
+      "acceptanceCriteria": [
+        "Settings has an optional 'Set panic PIN' field (separate from the main passphrase).",
+        "On UnlockScreen, if entered value matches the panic PIN hash, the app: deletes the DB file, deletes salt, clears DataStore, then shows the normal 'first run — create passphrase' UI as if fresh install.",
+        "Panic PIN is stored hashed (Argon2id over the PIN with a separate salt) in DataStore — never plaintext.",
+        "No logcat entry, no toast, no visual artifact on panic path in release builds.",
+        "Typecheck passes."
+      ],
+      "priority": 35,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-036",
+      "title": "Android Keystore wrapping of DB key (biometric required)",
+      "description": "As the device owner, I want the DB key additionally protected by Android Keystore so that a rooted attacker with the encrypted DB cannot brute-force it without the device biometric.",
+      "acceptanceCriteria": [
+        "CryptoManager gains wrapKey(rawKey) and unwrapKey(wrappedBlob) methods using KeyGenParameterSpec with setUserAuthenticationRequired(true) + setUserAuthenticationParameters(0, AUTHENTICATION_TYPE_BIOMETRIC_STRONG).",
+        "After first-run passphrase setup, the Argon2-derived key is wrapped by a Keystore AES/GCM/NoPadding key and stored in DataStore.",
+        "On subsequent unlocks: BiometricPrompt → unlock Keystore key → unwrap → open DB. Fallback to passphrase entry if biometric fails.",
+        "Passphrase change flow re-derives and re-wraps.",
+        "Feature gated behind Settings toggle 'Enable biometric unlock'. Off by default (opt-in).",
+        "Typecheck passes."
+      ],
+      "priority": 36,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-037",
+      "title": "Self-audit surfacing",
+      "description": "As the device owner, I want the app to flag its own unexpected behavior so that I can trust it.",
+      "acceptanceCriteria": [
+        "A SelfAuditView on the Settings screen shows: declared permissions (from PackageManager), permissions actually used by at least one enabled collector, per-collector write counts in last 24h.",
+        "Any declared permission with no enabled consumer is highlighted red with 'Unused — consider removing from manifest'.",
+        "Shows build flavor, version, commit hash (from BuildConfig), and installer source.",
+        "Typecheck passes."
+      ],
+      "priority": 37,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-038",
+      "title": "'What a tracker would see' simulator export",
+      "description": "As the device owner, I want a one-click JSON export mimicking what a typical ads SDK would POST so that I can inspect my fingerprint concretely.",
+      "acceptanceCriteria": [
+        "Settings > 'Simulate tracker payload' generates a JSON file at the SAF URI with fields grouped like a plausible ads-SDK payload: {device: {...}, network: {...}, app: {...}, user: {...}}.",
+        "Values come from the latest DataPoint per relevant (collectorId, key) in the DB.",
+        "Output includes a 'disclaimer' field: 'This file was generated locally from your own DB. It was never transmitted.'",
+        "No network egress during generation.",
+        "Typecheck passes."
+      ],
+      "priority": 38,
+      "passes": false,
+      "notes": ""
+    }
+  ],
+  "completionSignal": {
+    "v1_ready_when": [
+      "US-001 through US-010 all passes = true (foundation complete)",
+      "US-011 through US-020 all passes = true (Tier NONE collectors complete)",
+      "US-021 through US-028 passes = true (Tier RUNTIME complete)",
+      "US-029 through US-032 pass if targeting F-Droid; optional for Play Store release",
+      "US-034 and US-037 pass (export + self-audit — required for real use)",
+      "US-035, US-036, US-038 are polish and can ship in v1.1"
+    ]
+  }
+}

@@ -1,0 +1,166 @@
+package com.potpal.mirrortrack.scheduling
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.os.IBinder
+import androidx.core.app.NotificationCompat
+import com.potpal.mirrortrack.R
+import com.potpal.mirrortrack.collectors.CollectorRegistry
+import com.potpal.mirrortrack.collectors.Ingestor
+import com.potpal.mirrortrack.data.DataPointDao
+import com.potpal.mirrortrack.data.DatabaseHolder
+import com.potpal.mirrortrack.settings.CollectorPreferences
+import com.potpal.mirrortrack.ui.MainActivity
+import com.potpal.mirrortrack.util.Logger
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@AndroidEntryPoint
+class CollectionForegroundService : Service() {
+
+    @Inject lateinit var registry: CollectorRegistry
+    @Inject lateinit var ingestor: Ingestor
+    @Inject lateinit var prefs: CollectorPreferences
+    @Inject lateinit var databaseHolder: DatabaseHolder
+    @Inject lateinit var dao: DataPointDao
+
+    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val streamJobs = mutableMapOf<String, Job>()
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
+        startForeground(NOTIFICATION_ID, buildNotification(0, 0))
+        scope.launch { notificationUpdateLoop() }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_REFRESH_STREAMS -> scope.launch { refreshStreamedCollectors() }
+            else -> scope.launch { refreshStreamedCollectors() }
+        }
+        return START_STICKY
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onDestroy() {
+        scope.cancel()
+        streamJobs.clear()
+        super.onDestroy()
+    }
+
+    private suspend fun refreshStreamedCollectors() {
+        if (!databaseHolder.isOpen()) return
+
+        val allCollectors = registry.all()
+        val streamedCollectors = allCollectors.filter { it.defaultPollInterval == null }
+
+        for (collector in streamedCollectors) {
+            val effectiveEnabled = prefs.isEnabledSync(collector.id) || collector.defaultEnabled
+
+            if (effectiveEnabled && collector.isAvailable(applicationContext)) {
+                if (streamJobs[collector.id]?.isActive != true) {
+                    streamJobs[collector.id] = scope.launch {
+                        try {
+                            collector.stream(applicationContext).collect { point ->
+                                ingestor.submit(point)
+                                CollectorHealthTracker.recordSuccess(collector.id)
+                            }
+                        } catch (e: Exception) {
+                            Logger.w(TAG, "Stream ${collector.id} failed", e)
+                            CollectorHealthTracker.recordFailure(collector.id, e.message ?: "unknown")
+                        }
+                    }
+                    Logger.d(TAG, "Started stream: ${collector.id}")
+                }
+            } else {
+                streamJobs[collector.id]?.cancel()
+                streamJobs.remove(collector.id)
+            }
+        }
+    }
+
+    private suspend fun notificationUpdateLoop() {
+        while (true) {
+            delay(60_000)
+            if (!databaseHolder.isOpen()) continue
+            try {
+                val streamCount = streamJobs.count { it.value.isActive }
+                val todayMs = System.currentTimeMillis() - 86_400_000
+                val counts = dao.countByCollectorSince(todayMs)
+                val totalPoints = counts.sumOf { it.cnt }
+                val failedCount = CollectorHealthTracker.failedCollectors().size
+                val nm = getSystemService(NotificationManager::class.java)
+                nm.notify(NOTIFICATION_ID, buildNotification(streamCount, totalPoints.toInt(), failedCount))
+            } catch (_: Exception) { }
+        }
+    }
+
+    private fun buildNotification(streams: Int, pointsToday: Int, failedCollectors: Int = 0): Notification {
+        val intent = Intent(this, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(getString(R.string.fgs_notification_title))
+            .setContentText(getString(R.string.fgs_notification_text, streams, pointsToday))
+            .setSmallIcon(android.R.drawable.ic_menu_info_details)
+            .setOngoing(true)
+            .setContentIntent(pendingIntent)
+
+        if (failedCollectors > 0) {
+            builder.setSubText("$failedCollectors collector(s) failing")
+        }
+
+        return builder.build()
+    }
+
+    private fun createNotificationChannel() {
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            getString(R.string.fgs_channel_name),
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = getString(R.string.fgs_channel_desc)
+        }
+        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+    }
+
+    companion object {
+        private const val TAG = "CollectionFGS"
+        private const val CHANNEL_ID = "mirrortrack_collection"
+        private const val NOTIFICATION_ID = 1
+        const val ACTION_REFRESH_STREAMS = "com.potpal.mirrortrack.REFRESH_STREAMS"
+
+        fun startIfEnabled(context: Context) {
+            val intent = Intent(context, CollectionForegroundService::class.java)
+            context.startForegroundService(intent)
+        }
+
+        fun refreshStreams(context: Context) {
+            val intent = Intent(context, CollectionForegroundService::class.java).apply {
+                action = ACTION_REFRESH_STREAMS
+            }
+            context.startForegroundService(intent)
+        }
+
+        fun stop(context: Context) {
+            context.stopService(Intent(context, CollectionForegroundService::class.java))
+        }
+    }
+}

@@ -1,0 +1,27 @@
+*.iml
+.gradle
+/local.properties
+/.idea/
+.DS_Store
+/build
+**/build/
+/captures
+.kotlin/
+.externalNativeBuild
+.cxx
+local.properties
+
+# Kotlin
+*.kotlin_metadata
+
+# Python (desktop analysis)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Never commit actual collected data or decrypted DBs
+*.db
+*.db.enc
+salt.bin
+mirrortrack_*.db*

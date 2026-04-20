@@ -1,0 +1,5 @@
+argon2-cffi>=23.1.0
+duckdb>=1.1.0
+pandas>=2.2.0
+pysqlcipher3>=1.2.0 ; python_version < "3.12"
+# If pysqlcipher3 fails to install, use the sqlcipher CLI fallback in decrypt.py
