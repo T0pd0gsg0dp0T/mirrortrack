@@ -3,6 +3,8 @@ package com.potpal.mirrortrack.ui.insights
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.potpal.mirrortrack.collectors.Category
+import com.potpal.mirrortrack.collectors.CollectorRegistry
 import com.potpal.mirrortrack.data.DataPointDao
 import com.potpal.mirrortrack.data.entities.DataPointEntity
 import com.potpal.mirrortrack.settings.CollectorPreferences
@@ -145,10 +147,20 @@ data class InsightsState(
     val weekdayWeekend: WeekdayWeekendDelta? = null,
     val income: IncomeInference? = null,
     val commute: CommutePattern? = null,
+    // Collection summary
+    val categoryCounts: List<CategoryCount> = emptyList(),
+    val totalDataPoints: Long = 0L,
     // Per-card metadata
     val cardMeta: Map<String, InsightMeta> = emptyMap(),
     // Diagnostics toggle
     val showDiagnostics: Boolean = false
+)
+
+data class CategoryCount(
+    val name: String,
+    val displayName: String,
+    val count: Long,
+    val icon: String   // category enum name, resolved to icon in UI
 )
 
 data class TodayData(
@@ -372,7 +384,8 @@ data class CommutePattern(
 class InsightsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val dao: DataPointDao,
-    private val prefs: CollectorPreferences
+    private val prefs: CollectorPreferences,
+    private val registry: CollectorRegistry
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(InsightsState())
@@ -485,6 +498,16 @@ class InsightsViewModel @Inject constructor(
             _state.update { it.copy(loading = true) }
             metaAccumulator.clear()
 
+            // Load collection summary
+            val catCountsDef = async {
+                Category.entries.map { cat ->
+                    val collectors = registry.byCategory(cat)
+                    val total = collectors.sumOf { dao.countByCollector(it.id) }
+                    CategoryCount(cat.name, cat.displayName, total, cat.name)
+                }
+            }
+            val totalDef = async { dao.count() }
+
             val todayDef = async { computeToday() }
             val sleepDef = async { computeSleep() }
             val appsDef = async { computeAppAttention() }
@@ -561,6 +584,8 @@ class InsightsViewModel @Inject constructor(
 
             _state.update { it.copy(
                 loading = false,
+                categoryCounts = catCountsDef.await(),
+                totalDataPoints = totalDef.await(),
                 today = today,
                 sleepDays = sleepDays,
                 appAttention = appAttention,

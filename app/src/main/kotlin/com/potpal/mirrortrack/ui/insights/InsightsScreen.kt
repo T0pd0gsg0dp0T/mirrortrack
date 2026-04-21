@@ -8,6 +8,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -54,6 +56,11 @@ import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.DeviceHub
+import androidx.compose.material.icons.filled.NetworkCheck
+import androidx.compose.material.icons.filled.Sensors
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -108,9 +115,11 @@ private val CellEmpty = Color(0xFF21262D)
 
 // ── Root screen ──────────────────────────────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun InsightsScreen(
+    onNavigateToSettings: () -> Unit = {},
+    onNavigateToCategoryDetail: (String) -> Unit = {},
     viewModel: InsightsViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -122,7 +131,7 @@ fun InsightsScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Psychology, null, tint = TerminalGreen, modifier = Modifier.size(24.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Insights", fontWeight = FontWeight.Bold)
+                        Text("MirrorTrack", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                     }
                 },
                 actions = {
@@ -135,6 +144,9 @@ fun InsightsScreen(
                     }
                     IconButton(onClick = { viewModel.refresh() }) {
                         Icon(Icons.Default.Refresh, "Refresh", tint = TerminalGreen)
+                    }
+                    IconButton(onClick = onNavigateToSettings) {
+                        Icon(Icons.Default.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -161,6 +173,41 @@ fun InsightsScreen(
             ) {
                 val meta = state.cardMeta
                 val diag = state.showDiagnostics
+
+                // ── COLLECTION SUMMARY ──────────────────────────────
+                item(key = "collection_header") {
+                    CollectionHeader(
+                        totalDataPoints = state.totalDataPoints,
+                        categories = state.categoryCounts,
+                        onCategoryClick = onNavigateToCategoryDetail
+                    )
+                }
+
+                // ── DIVIDER: what this data reveals ─────────────────
+                item(key = "inference_divider") {
+                    Column(modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)) {
+                        HorizontalDivider(color = DimGray.copy(alpha = 0.3f))
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "WHAT THIS DATA REVEALS",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = TerminalAmber,
+                            letterSpacing = 2.sp
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Below are the same inferences that data brokers, ad networks, " +
+                            "and tracker SDKs derive from the data above. Every card shows " +
+                            "a real conclusion that can be drawn from your device activity.",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = DimGray,
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
 
                 // Card 1: Today
                 state.today?.let { today ->
@@ -315,6 +362,97 @@ fun InsightsScreen(
                 }
 
                 item { Spacer(Modifier.height(16.dp)) }
+            }
+        }
+    }
+}
+
+// ── Collection header ───────────────────────────────────────────────
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CollectionHeader(
+    totalDataPoints: Long,
+    categories: List<CategoryCount>,
+    onCategoryClick: (String) -> Unit
+) {
+    Column {
+        Text(
+            "COLLECTED DATA",
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            color = TerminalGreen,
+            letterSpacing = 2.sp
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "${formatLargeNumber(totalDataPoints)} data points across ${categories.count { it.count > 0 }} categories",
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace,
+            color = DimGray
+        )
+        Spacer(Modifier.height(8.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            for (cat in categories) {
+                CategoryChip(cat, onClick = { onCategoryClick(cat.name) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryChip(cat: CategoryCount, onClick: () -> Unit) {
+    val icon = when (cat.icon) {
+        "DEVICE_IDENTITY" -> Icons.Default.DeviceHub
+        "NETWORK" -> Icons.Default.NetworkCheck
+        "LOCATION" -> Icons.Default.LocationOn
+        "SENSORS" -> Icons.Default.Sensors
+        "BEHAVIORAL" -> Icons.Default.Timeline
+        "PERSONAL" -> Icons.Default.Person
+        "APPS" -> Icons.Default.Apps
+        else -> Icons.Default.DeviceHub
+    }
+    val hasData = cat.count > 0
+
+    Card(
+        modifier = Modifier.clickable(onClick = onClick),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (hasData) MaterialTheme.colorScheme.surface
+            else MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                icon, null,
+                tint = if (hasData) TerminalGreen else DimGray,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(Modifier.width(4.dp))
+            Column {
+                Text(
+                    cat.displayName,
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = if (hasData) MaterialTheme.colorScheme.onSurface else DimGray,
+                    maxLines = 1
+                )
+                Text(
+                    if (hasData) formatLargeNumber(cat.count) else "---",
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = if (hasData) TerminalGreen else DimGray
+                )
             }
         }
     }
