@@ -27,6 +27,8 @@ import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Bed
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.LocationOn
@@ -83,6 +85,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -201,15 +204,37 @@ fun InsightsScreen(
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "Below are the same inferences that data brokers, ad networks, " +
-                            "and tracker SDKs derive from the data above. Every card shows " +
-                            "a real conclusion that can be drawn from your device activity.",
+                            "Your phone produces tiny clues all day: unlocks, motion, app use, " +
+                            "locations, notifications, sound, light, and network activity. Alone, " +
+                            "each clue seems harmless. Combined over time, they can describe your " +
+                            "routine, relationships, sleep, work schedule, habits, and likely weak spots.",
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
                             color = DimGray,
                             lineHeight = 16.sp
                         )
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Speed,
+                                null,
+                                tint = if (diag) TerminalAmber else DimGray,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "The speedometer button shows diagnostics: data source, point count, age, and fallback signals behind each card.",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = if (diag) TerminalAmber else DimGray,
+                                lineHeight = 14.sp
+                            )
+                        }
                     }
+                }
+
+                item(key = "surveillance_primer") {
+                    SurveillancePrimerCard()
                 }
 
                 // High-level behavioral summary
@@ -347,39 +372,110 @@ private data class UnavailableInsight(
 )
 
 private fun unavailableInsightsFor(state: InsightsState): List<UnavailableInsight> = buildList {
-    if (state.engagement == null) add(UnavailableInsight("Engagement Score", Icons.Default.Speed, "Needs enough screen/app lifecycle sessions."))
-    if (state.today == null) add(UnavailableInsight("Today", Icons.Default.Timeline, "Needs today's collector activity."))
-    if (state.sleepDays.isEmpty() && state.sleepIntervals72h.isEmpty()) add(UnavailableInsight("Sleep Timeline", Icons.Default.Bed, "Needs screen inactivity plus optional light/sound signals."))
-    if (state.anomalies.isEmpty()) add(UnavailableInsight("Anomaly Feed", Icons.Default.Warning, "No unusual behavior detected yet."))
-    if (state.homeWork == null) add(UnavailableInsight("Home & Work", Icons.Default.Home, "Needs repeated location clusters across time of day."))
-    if (state.commute?.detected != true) add(UnavailableInsight("Commute Pattern", Icons.Default.DirectionsCar, "Needs repeated departure and return patterns."))
-    if (state.locationClusters.isEmpty()) add(UnavailableInsight("Location Clusters", Icons.Default.LocationOn, "Needs location fixes from the Location collector."))
-    if (state.dwellTimes.isEmpty()) add(UnavailableInsight("Dwell Times", Icons.Default.Place, "Needs enough visits to estimate stop duration."))
-    if (state.circadian == null) add(UnavailableInsight("Circadian Rhythm", Icons.Default.WbSunny, "Needs enough activity events across the day."))
-    if (state.routine == null) add(UnavailableInsight("Routine Predictability", Icons.Default.Schedule, "Needs repeated activity timing over multiple days."))
-    if (state.weekdayWeekend == null) add(UnavailableInsight("Weekday vs Weekend", Icons.Default.CalendarMonth, "Needs weekday and weekend samples."))
-    if (state.monthlyTrends.size < 2) add(UnavailableInsight("Monthly Trends", Icons.Default.Timeline, "Needs at least two months of data."))
-    if (state.socialPressure.isEmpty()) add(UnavailableInsight("Social Pressure", Icons.Default.Notifications, "Needs notification and unlock timing data."))
-    if (state.unlockLatencies.isEmpty()) add(UnavailableInsight("Unlock After Notification", Icons.Default.Notifications, "Needs notification-to-unlock samples."))
-    if (state.privacyRadar.isEmpty()) add(UnavailableInsight("Privacy Radar", Icons.Default.Shield, "Needs privacy access or AppOps audit data."))
-    if (state.appCompulsion.isEmpty()) add(UnavailableInsight("App Compulsion Index", Icons.Default.Repeat, "Needs app launch or usage samples."))
-    if (state.sessionFrag == null) add(UnavailableInsight("Session Fragmentation", Icons.Default.DataUsage, "Needs app switching/session activity."))
-    if (state.voiceContext == null) add(UnavailableInsight("Voice Context", Icons.Default.Mic, "Needs enabled voice transcription samples."))
-    if (state.deviceHealth == null) add(UnavailableInsight("Device Health", Icons.Default.Memory, "Needs system stats or battery fallback data."))
-    if (state.charging == null) add(UnavailableInsight("Charging Behavior", Icons.Default.BatteryChargingFull, "Needs battery charge/discharge events."))
-    if (state.income == null) add(UnavailableInsight("Income Inference", Icons.Default.AttachMoney, "Needs device, carrier, and app portfolio hints."))
-    if (state.wifiFootprint == null) add(UnavailableInsight("WiFi Footprint", Icons.Default.Wifi, "Needs Wi-Fi scan or connectivity samples."))
-    if (state.appPortfolio == null) add(UnavailableInsight("App Portfolio", Icons.Default.Apps, "Needs installed-app inventory data."))
-    if (state.appAttention.isEmpty()) add(UnavailableInsight("App Attention (7d)", Icons.Default.Smartphone, "Needs usage stats or app foreground data."))
-    if (state.dataFlow.isEmpty()) add(UnavailableInsight("Data Flow", Icons.Default.SwapVert, "Needs per-app network usage data."))
-    if (state.fingerprint.isEmpty()) add(UnavailableInsight("Fingerprint Stability", Icons.Default.Fingerprint, "Needs device identity snapshots."))
-    if (state.identityEntropy == null) add(UnavailableInsight("Identity Entropy", Icons.Default.Fingerprint, "Needs enough fingerprint fields to estimate uniqueness."))
+    if (state.engagement == null) add(UnavailableInsight("Engagement Score", Icons.Default.Speed, "Waiting for enough opens, sessions, and active days to estimate habit strength."))
+    if (state.today == null) add(UnavailableInsight("Today", Icons.Default.Timeline, "Waiting for today's basic activity totals."))
+    if (state.sleepDays.isEmpty() && state.sleepIntervals72h.isEmpty()) add(UnavailableInsight("Sleep Timeline", Icons.Default.Bed, "Waiting for long inactive periods, ideally with dark or quiet-room clues."))
+    if (state.anomalies.isEmpty()) add(UnavailableInsight("Anomaly Feed", Icons.Default.Warning, "Nothing unusual stands out yet; this appears after behavior breaks your normal pattern."))
+    if (state.homeWork == null) add(UnavailableInsight("Home & Work", Icons.Default.Home, "Waiting for repeated places at night and during weekday daytime."))
+    if (state.commute?.detected != true) add(UnavailableInsight("Commute Pattern", Icons.Default.DirectionsCar, "Waiting for repeated leave-and-return timing between common places."))
+    if (state.locationClusters.isEmpty()) add(UnavailableInsight("Location Clusters", Icons.Default.LocationOn, "Waiting for enough location points to group recurring places."))
+    if (state.dwellTimes.isEmpty()) add(UnavailableInsight("Dwell Times", Icons.Default.Place, "Waiting to see how long the device stays at recurring places."))
+    if (state.circadian == null) add(UnavailableInsight("Circadian Rhythm", Icons.Default.WbSunny, "Waiting for enough activity across morning, day, evening, and night."))
+    if (state.routine == null) add(UnavailableInsight("Routine Predictability", Icons.Default.Schedule, "Waiting for repeated daily timing patterns."))
+    if (state.weekdayWeekend == null) add(UnavailableInsight("Weekday vs Weekend", Icons.Default.CalendarMonth, "Waiting for both workweek and weekend behavior."))
+    if (state.monthlyTrends.size < 2) add(UnavailableInsight("Monthly Trends", Icons.Default.Timeline, "Waiting for at least two calendar months to compare."))
+    if (state.socialPressure.isEmpty()) add(UnavailableInsight("Social Pressure", Icons.Default.Notifications, "Waiting to see whether notifications reliably pull you back to the phone."))
+    if (state.unlockLatencies.isEmpty()) add(UnavailableInsight("Unlock After Notification", Icons.Default.Notifications, "Waiting for notifications followed by unlocks close enough to connect them."))
+    if (state.privacyRadar.isEmpty()) add(UnavailableInsight("Privacy Radar", Icons.Default.Shield, "Waiting for evidence that apps used sensitive surfaces like camera, mic, location, or contacts."))
+    if (state.appCompulsion.isEmpty()) add(UnavailableInsight("App Compulsion Index", Icons.Default.Repeat, "Waiting for repeated app opens that suggest checking loops."))
+    if (state.sessionFrag == null) add(UnavailableInsight("Session Fragmentation", Icons.Default.DataUsage, "Waiting for enough app switching to estimate attention fragmentation."))
+    if (state.voiceContext == null) add(UnavailableInsight("Voice Context", Icons.Default.Mic, "Waiting for local speech-window summaries or setup status."))
+    if (state.deviceHealth == null) add(UnavailableInsight("Device Health", Icons.Default.Memory, "Waiting for system or battery readings that explain device condition."))
+    if (state.charging == null) add(UnavailableInsight("Charging Behavior", Icons.Default.BatteryChargingFull, "Waiting for charge and discharge cycles."))
+    if (state.income == null) add(UnavailableInsight("Income Inference", Icons.Default.AttachMoney, "Waiting for enough device, carrier, and app clues to show how crude income profiling works."))
+    if (state.wifiFootprint == null) add(UnavailableInsight("WiFi Footprint", Icons.Default.Wifi, "Waiting for Wi-Fi history that can act like a location trail."))
+    if (state.appPortfolio == null) add(UnavailableInsight("App Portfolio", Icons.Default.Apps, "Waiting for installed-app inventory to reveal interest and lifestyle categories."))
+    if (state.appAttention.isEmpty()) add(UnavailableInsight("App Attention (7d)", Icons.Default.Smartphone, "Waiting for app foreground time: which apps actually held your attention."))
+    if (state.dataFlow.isEmpty()) add(UnavailableInsight("Data Flow", Icons.Default.SwapVert, "Waiting for per-app network traffic totals."))
+    if (state.fingerprint.isEmpty()) add(UnavailableInsight("Fingerprint Stability", Icons.Default.Fingerprint, "Waiting for device identity fields to compare over time."))
+    if (state.identityEntropy == null) add(UnavailableInsight("Identity Entropy", Icons.Default.Fingerprint, "Waiting for enough device traits to show how uniqueness is estimated."))
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SurveillancePrimerCard() {
+    var collapsed by rememberSaveable("surveillance_primer:collapsed") { mutableStateOf(false) }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Info, null, tint = TerminalAmber, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Surveillance in plain English",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = { collapsed = !collapsed }, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        if (collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                        if (collapsed) "Expand surveillance primer" else "Collapse surveillance primer",
+                        tint = DimGray,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+            if (!collapsed) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "A data point is one small fact, like an unlock time or Wi-Fi name. " +
+                        "An inference is a guess made by combining many facts, like likely bedtime, commute, or stress. " +
+                        "The risk is not one permission by itself; it is the pattern that appears when ordinary signals are collected for days.",
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(
+                        "data point = one clue",
+                        "inference = educated guess",
+                        "profile = repeated pattern",
+                        "confidence = how strong the evidence is"
+                    ).forEach { label ->
+                        Text(
+                            label,
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = TerminalAmber,
+                            modifier = Modifier
+                                .background(TerminalAmber.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 6.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
 private fun UnavailableInsightCard(insight: UnavailableInsight) {
+    var collapsed by rememberSaveable("${insight.title}:unavailable:collapsed") { mutableStateOf(false) }
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f))
     ) {
@@ -404,22 +500,35 @@ private fun UnavailableInsightCard(insight: UnavailableInsight) {
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                 )
+                if (!collapsed) {
+                    Text(
+                        insight.reason,
+                        fontSize = 11.sp,
+                        color = DimGray
+                    )
+                }
+            }
+            if (!collapsed) {
                 Text(
-                    insight.reason,
-                    fontSize = 11.sp,
-                    color = DimGray
+                    "WAITING",
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = DimGray,
+                    modifier = Modifier
+                        .background(DimGray.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                )
+                Spacer(Modifier.width(4.dp))
+            }
+            IconButton(onClick = { collapsed = !collapsed }, modifier = Modifier.size(28.dp)) {
+                Icon(
+                    if (collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                    if (collapsed) "Expand ${insight.title}" else "Collapse ${insight.title}",
+                    tint = DimGray,
+                    modifier = Modifier.size(18.dp)
                 )
             }
-            Text(
-                "WAITING",
-                fontSize = 9.sp,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                color = DimGray,
-                modifier = Modifier
-                    .background(DimGray.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                    .padding(horizontal = 5.dp, vertical = 2.dp)
-            )
         }
     }
 }
@@ -846,7 +955,8 @@ private fun AppAttentionCard(apps: List<AppAttention>, meta: InsightMeta? = null
 
 @Composable
 private fun AnomalyCard(anomaly: Anomaly, onDismiss: () -> Unit) {
-    var infoExpanded by remember { mutableStateOf(false) }
+    var infoExpanded by rememberSaveable(anomaly.id) { mutableStateOf(false) }
+    var collapsed by rememberSaveable("${anomaly.id}:collapsed") { mutableStateOf(false) }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -875,31 +985,47 @@ private fun AnomalyCard(anomaly: Anomaly, onDismiss: () -> Unit) {
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                Text(
-                    anomaly.description,
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    relativeTime(anomaly.timestamp),
-                    fontSize = 9.sp,
-                    color = DimGray,
-                    fontFamily = FontFamily.Monospace
-                )
-                if (infoExpanded) {
-                    EducationalInfoPanel(
-                        text = educationalInfoForTitle("Anomaly Feed"),
-                        accent = TerminalAmber,
-                        modifier = Modifier.padding(top = 8.dp)
+                if (!collapsed) {
+                    Text(
+                        anomaly.description,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Text(
+                        relativeTime(anomaly.timestamp),
+                        fontSize = 9.sp,
+                        color = DimGray,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    if (infoExpanded) {
+                        EducationalInfoPanel(
+                            text = educationalInfoForTitle("Anomaly Feed"),
+                            accent = TerminalAmber,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
                 }
             }
-            IconButton(onClick = { infoExpanded = !infoExpanded }, modifier = Modifier.size(28.dp)) {
+            IconButton(
+                onClick = {
+                    infoExpanded = !infoExpanded
+                    if (infoExpanded) collapsed = false
+                },
+                modifier = Modifier.size(28.dp)
+            ) {
                 Icon(
                     Icons.Default.Info,
                     "Explain anomaly card",
                     tint = if (infoExpanded) TerminalAmber else DimGray,
                     modifier = Modifier.size(16.dp)
+                )
+            }
+            IconButton(onClick = { collapsed = !collapsed }, modifier = Modifier.size(28.dp)) {
+                Icon(
+                    if (collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                    if (collapsed) "Expand anomaly card" else "Collapse anomaly card",
+                    tint = DimGray,
+                    modifier = Modifier.size(18.dp)
                 )
             }
             IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
@@ -2813,10 +2939,13 @@ private fun InsightCardShell(
     showDiagnostics: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    var infoExpanded by remember { mutableStateOf(false) }
+    var infoExpanded by rememberSaveable(title) { mutableStateOf(false) }
+    var collapsed by rememberSaveable("$title:collapsed") { mutableStateOf(false) }
     val educationalInfo = educationalInfoForTitle(title)
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
@@ -2839,12 +2968,27 @@ private fun InsightCardShell(
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f)
                 )
-                IconButton(onClick = { infoExpanded = !infoExpanded }, modifier = Modifier.size(28.dp)) {
+                IconButton(
+                    onClick = {
+                        infoExpanded = !infoExpanded
+                        if (infoExpanded) collapsed = false
+                    },
+                    modifier = Modifier.size(28.dp)
+                ) {
                     Icon(
                         Icons.Default.Info,
                         "Explain $title",
                         tint = if (infoExpanded) accent else DimGray,
                         modifier = Modifier.size(16.dp)
+                    )
+                }
+                Spacer(Modifier.width(4.dp))
+                IconButton(onClick = { collapsed = !collapsed }, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        if (collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                        if (collapsed) "Expand $title" else "Collapse $title",
+                        tint = DimGray,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
                 Spacer(Modifier.width(4.dp))
@@ -2892,59 +3036,62 @@ private fun InsightCardShell(
                     }
                 }
             }
-            if (infoExpanded) {
-                Spacer(Modifier.height(8.dp))
-                EducationalInfoPanel(text = educationalInfo, accent = accent)
-            }
-            // Data source + diagnostic info
-            if (meta != null && showDiagnostics) {
-                Spacer(Modifier.height(4.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        "src: ${meta.dataSource}",
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = DimGray
-                    )
-                    Text(
-                        "${meta.dataPointCount} pts",
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = DimGray
-                    )
-                    if (meta.newestDataMs > 0) {
+            if (!collapsed) {
+                if (infoExpanded) {
+                    Spacer(Modifier.height(8.dp))
+                    EducationalInfoPanel(text = educationalInfo, accent = accent)
+                }
+                // Data source + diagnostic info
+                if (meta != null && showDiagnostics) {
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         Text(
-                            meta.ageLabel,
+                            "src: ${meta.dataSource}",
                             fontSize = 9.sp,
                             fontFamily = FontFamily.Monospace,
-                            color = if (meta.isStale) TerminalAmber else DimGray
+                            color = DimGray
+                        )
+                        Text(
+                            "${meta.dataPointCount} pts",
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = DimGray
+                        )
+                        if (meta.newestDataMs > 0) {
+                            Text(
+                                meta.ageLabel,
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = if (meta.isStale) TerminalAmber else DimGray
+                            )
+                        }
+                    }
+                    if (meta.attempted.size > 1) {
+                        Text(
+                            "tried: ${meta.attempted.joinToString(" > ")}",
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = DimGray.copy(alpha = 0.7f)
                         )
                     }
                 }
-                if (meta.attempted.size > 1) {
+                // Limited data warning
+                if (meta != null && meta.confidence == ConfidenceTier.LOW && !showDiagnostics) {
+                    Spacer(Modifier.height(2.dp))
                     Text(
-                        "tried: ${meta.attempted.joinToString(" > ")}",
-                        fontSize = 8.sp,
+                        "Read cautiously: this is based on limited evidence" +
+                            if (meta.dataSource.startsWith("fallback")) " from a backup signal" else "",
+                        fontSize = 9.sp,
                         fontFamily = FontFamily.Monospace,
-                        color = DimGray.copy(alpha = 0.7f)
+                        color = DimGray
                     )
                 }
+                Spacer(Modifier.height(12.dp))
+                content()
             }
-            // Limited data warning
-            if (meta != null && meta.confidence == ConfidenceTier.LOW && !showDiagnostics) {
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    "Based on limited data" + if (meta.dataSource.startsWith("fallback")) " (${meta.dataSource.removePrefix("fallback:")})" else "",
-                    fontSize = 9.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = DimGray
-                )
-            }
-            Spacer(Modifier.height(12.dp))
-            content()
         }
     }
 }
@@ -2963,7 +3110,7 @@ private fun EducationalInfoPanel(
             .padding(10.dp)
     ) {
         Text(
-            "HOW TO READ THIS",
+            "PLAIN ENGLISH",
             fontSize = 9.sp,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Bold,
@@ -2973,6 +3120,25 @@ private fun EducationalInfoPanel(
         Spacer(Modifier.height(4.dp))
         Text(
             text,
+            fontSize = 11.sp,
+            lineHeight = 15.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(8.dp))
+        HorizontalDivider(color = accent.copy(alpha = 0.25f))
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "WHY IT MATTERS",
+            fontSize = 9.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            color = accent,
+            letterSpacing = 1.sp
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "These patterns can be useful for self-awareness, but they can also be used to target ads, " +
+                "raise prices, infer private life events, pressure habits, or judge people without their knowledge.",
             fontSize = 11.sp,
             lineHeight = 15.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant

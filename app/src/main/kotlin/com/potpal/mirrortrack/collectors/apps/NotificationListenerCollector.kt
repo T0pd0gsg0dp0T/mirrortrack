@@ -7,11 +7,13 @@ import com.potpal.mirrortrack.collectors.Category
 import com.potpal.mirrortrack.collectors.Collector
 import com.potpal.mirrortrack.collectors.DataPoint
 import com.potpal.mirrortrack.util.Logger
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.days
-import kotlin.time.Duration.Companion.hours
 
 @Singleton
 class NotificationListenerCollector @Inject constructor() : Collector {
@@ -23,7 +25,7 @@ class NotificationListenerCollector @Inject constructor() : Collector {
     override val requiredPermissions: List<String> = emptyList()
     override val accessTier = AccessTier.SPECIAL_ACCESS
     override val defaultEnabled = false
-    override val defaultPollInterval: Duration = 1.hours
+    override val defaultPollInterval: Duration? = null
     override val defaultRetention: Duration = 30.days
 
     override suspend fun isAvailable(context: Context): Boolean {
@@ -59,7 +61,15 @@ class NotificationListenerCollector @Inject constructor() : Collector {
         return points
     }
 
+    override fun stream(context: Context): Flow<DataPoint> = flow {
+        while (true) {
+            collect(context).forEach { emit(it) }
+            delay(DRAIN_INTERVAL_MS)
+        }
+    }
+
     companion object {
         private const val TAG = "NLSCollector"
+        private const val DRAIN_INTERVAL_MS = 60_000L
     }
 }

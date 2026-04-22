@@ -159,6 +159,17 @@ class SettingsViewModel @Inject constructor(
     }
 
     val isServiceEnabled: Flow<Boolean> = prefs.isServiceEnabled()
+    val isCollectionNotificationDetailsEnabled: Flow<Boolean> =
+        prefs.isCollectionNotificationDetailsEnabled()
+
+    fun setCollectionNotificationDetailsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            prefs.setCollectionNotificationDetailsEnabled(enabled)
+            if (prefs.isServiceEnabled().first()) {
+                CollectionForegroundService.refreshNotification(context)
+            }
+        }
+    }
 
     fun setPanicPin(pin: String) {
         viewModelScope.launch {
@@ -263,6 +274,8 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     val collectorsByCategory = remember { viewModel.getCollectorsByCategory() }
     val isServiceEnabled by viewModel.isServiceEnabled.collectAsStateWithLifecycle(initialValue = false)
+    val isCollectionNotificationDetailsEnabled by viewModel.isCollectionNotificationDetailsEnabled
+        .collectAsStateWithLifecycle(initialValue = true)
     var showPanicPinDialog by remember { mutableStateOf(false) }
     var showPollSlider by remember { mutableStateOf<String?>(null) }
     var showSelfAudit by remember { mutableStateOf(false) }
@@ -339,6 +352,36 @@ fun SettingsScreen(
                         onCheckedChange = {
                             if (it) viewModel.startService() else viewModel.stopService()
                         },
+                        colors = SwitchDefaults.colors(
+                            uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            uncheckedTrackColor = MaterialTheme.colorScheme.outline,
+                            uncheckedBorderColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    )
+                }
+            }
+        }
+
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Notification data summary", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "Show collected point counts in the ongoing notification. Android still requires a foreground notification while collection runs.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = isCollectionNotificationDetailsEnabled,
+                        onCheckedChange = viewModel::setCollectionNotificationDetailsEnabled,
                         colors = SwitchDefaults.colors(
                             uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
                             uncheckedTrackColor = MaterialTheme.colorScheme.outline,

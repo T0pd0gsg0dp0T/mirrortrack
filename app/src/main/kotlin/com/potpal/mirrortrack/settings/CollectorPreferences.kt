@@ -72,6 +72,20 @@ class CollectorPreferences @Inject constructor(
         }
     }
 
+    fun isCollectionNotificationDetailsEnabled(): Flow<Boolean> =
+        context.collectorDataStore.data.map { prefs ->
+            prefs[booleanPreferencesKey("notification.collection_details.enabled")] ?: true
+        }
+
+    suspend fun isCollectionNotificationDetailsEnabledSync(): Boolean =
+        context.collectorDataStore.data.first()[booleanPreferencesKey("notification.collection_details.enabled")] ?: true
+
+    suspend fun setCollectionNotificationDetailsEnabled(enabled: Boolean) {
+        context.collectorDataStore.edit { prefs ->
+            prefs[booleanPreferencesKey("notification.collection_details.enabled")] = enabled
+        }
+    }
+
     fun getPanicPinHash(): Flow<String?> =
         context.collectorDataStore.data.map { prefs ->
             prefs[stringPreferencesKey("panic.pin_hash")]

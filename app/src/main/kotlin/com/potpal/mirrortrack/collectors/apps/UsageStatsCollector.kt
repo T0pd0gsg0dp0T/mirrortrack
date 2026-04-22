@@ -1,6 +1,7 @@
 package com.potpal.mirrortrack.collectors.apps
 
 import android.app.AppOpsManager
+import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.os.Process
@@ -59,12 +60,28 @@ class UsageStatsCollector @Inject constructor() : Collector {
 
         if (stats.isNullOrEmpty()) return emptyList()
 
+        val launchCounts = mutableMapOf<String, Int>()
+        try {
+            val events = usm.queryEvents(oneDayAgo, now)
+            val event = UsageEvents.Event()
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event)
+                if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED ||
+                    event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                    launchCounts[event.packageName] = (launchCounts[event.packageName] ?: 0) + 1
+                }
+            }
+        } catch (e: SecurityException) {
+            Logger.e(TAG, "Usage event permission denied", e)
+        }
+
         return stats
             .groupBy { it.packageName }
             .map { (pkg, entries) ->
                 val totalFg = entries.sumOf { it.totalTimeInForeground }
                 val lastUsed = entries.maxOf { it.lastTimeUsed }
-                val json = """{"package":"${escapeJson(pkg)}","total_foreground_ms":$totalFg,"last_used_ms":$lastUsed}"""
+                val launches = launchCounts[pkg] ?: 0
+                val json = """{"package":"${escapeJson(pkg)}","total_foreground_ms":$totalFg,"last_used_ms":$lastUsed,"launch_count":$launches}"""
                 DataPoint.json(id, category, "package_usage:$pkg", json)
             }
             .sortedByDescending {

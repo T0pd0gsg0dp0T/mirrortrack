@@ -50,6 +50,7 @@ class CollectionForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_REFRESH_STREAMS -> scope.launch { refreshStreamedCollectors() }
+            ACTION_REFRESH_NOTIFICATION -> scope.launch { updateNotification() }
             else -> scope.launch { refreshStreamedCollectors() }
         }
         return START_STICKY
@@ -95,34 +96,65 @@ class CollectionForegroundService : Service() {
                 CollectorHealthTracker.clear(collector.id)
             }
         }
+        updateNotification()
     }
 
     private suspend fun notificationUpdateLoop() {
         while (true) {
             delay(60_000)
-            if (!databaseHolder.isOpen()) continue
-            try {
-                val streamCount = streamJobs.count { it.value.isActive }
-                val todayMs = System.currentTimeMillis() - 86_400_000
-                val counts = dao.countByCollectorSince(todayMs)
-                val totalPoints = counts.sumOf { it.cnt }
-                val failedCount = CollectorHealthTracker.failedCollectors().size
-                val nm = getSystemService(NotificationManager::class.java)
-                nm.notify(NOTIFICATION_ID, buildNotification(streamCount, totalPoints.toInt(), failedCount))
-            } catch (_: Exception) { }
+            updateNotification()
         }
     }
 
-    private fun buildNotification(streams: Int, pointsToday: Int, failedCollectors: Int = 0): Notification {
+    private suspend fun updateNotification() {
+        if (!databaseHolder.isOpen()) return
+        try {
+            val streamCount = streamJobs.count { it.value.isActive }
+            val todayMs = System.currentTimeMillis() - 86_400_000
+            val pointsToday = dao.countSince(todayMs)
+            val totalPoints = dao.count()
+            val failedCount = CollectorHealthTracker.failedCollectors().size
+            val showDetails = prefs.isCollectionNotificationDetailsEnabledSync()
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.notify(
+                NOTIFICATION_ID,
+                buildNotification(
+                    streams = streamCount,
+                    pointsToday = pointsToday,
+                    totalPoints = totalPoints,
+                    failedCollectors = failedCount,
+                    showDetails = showDetails
+                )
+            )
+        } catch (_: Exception) { }
+    }
+
+    private fun buildNotification(
+        streams: Int,
+        pointsToday: Long,
+        totalPoints: Long = 0L,
+        failedCollectors: Int = 0,
+        showDetails: Boolean = true
+    ): Notification {
         val intent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        val contentText = if (showDetails) {
+            getString(
+                R.string.fgs_notification_text,
+                formatNotificationCount(totalPoints),
+                formatNotificationCount(pointsToday),
+                streams
+            )
+        } else {
+            getString(R.string.fgs_notification_text_private)
+        }
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.fgs_notification_title))
-            .setContentText(getString(R.string.fgs_notification_text, streams, pointsToday))
+            .setContentText(contentText)
             .setSmallIcon(android.R.drawable.ic_menu_info_details)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
@@ -133,6 +165,13 @@ class CollectionForegroundService : Service() {
 
         return builder.build()
     }
+
+    private fun formatNotificationCount(count: Long): String =
+        when {
+            count >= 1_000_000 -> "${count / 1_000_000}M"
+            count >= 1_000 -> "${count / 1_000}K"
+            else -> count.toString()
+        }
 
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
@@ -150,6 +189,7 @@ class CollectionForegroundService : Service() {
         private const val CHANNEL_ID = "mirrortrack_collection"
         private const val NOTIFICATION_ID = 1
         const val ACTION_REFRESH_STREAMS = "com.potpal.mirrortrack.REFRESH_STREAMS"
+        const val ACTION_REFRESH_NOTIFICATION = "com.potpal.mirrortrack.REFRESH_NOTIFICATION"
 
         fun startIfEnabled(context: Context) {
             val intent = Intent(context, CollectionForegroundService::class.java)
@@ -159,6 +199,13 @@ class CollectionForegroundService : Service() {
         fun refreshStreams(context: Context) {
             val intent = Intent(context, CollectionForegroundService::class.java).apply {
                 action = ACTION_REFRESH_STREAMS
+            }
+            context.startForegroundService(intent)
+        }
+
+        fun refreshNotification(context: Context) {
+            val intent = Intent(context, CollectionForegroundService::class.java).apply {
+                action = ACTION_REFRESH_NOTIFICATION
             }
             context.startForegroundService(intent)
         }

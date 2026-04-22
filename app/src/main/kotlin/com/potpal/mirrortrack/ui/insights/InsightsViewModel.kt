@@ -1554,7 +1554,7 @@ class InsightsViewModel @Inject constructor(
     private suspend fun computePrivacyRadar(): List<PrivacyRadarEntry> {
         val ninetyDaysAgo = System.currentTimeMillis() - 90 * 86_400_000L
         var opsData = dao.byCollectorSince("appops_audit", ninetyDaysAgo)
-            .filter { it.key.startsWith("appops:") }
+            .filter { it.key.startsWith("appop:") || it.key.startsWith("appops:") }
 
         // Fallback: privacy_dashboard collector (Android 12+ reflection-based)
         if (opsData.isEmpty()) {
@@ -1567,7 +1567,7 @@ class InsightsViewModel @Inject constructor(
                     val parts = dp.key.removePrefix("usage:").split(":", limit = 2)
                     val pkg = parts.getOrElse(0) { "" }
                     val group = parts.getOrElse(1) { "" }
-                    dp.copy(key = "appops:$pkg:$group")
+                    dp.copy(key = "appop:$pkg:$group")
                 }
             }
         }
@@ -1578,7 +1578,10 @@ class InsightsViewModel @Inject constructor(
         data class OpRecord(val pkg: String, val op: String, val lastAccess: Long)
 
         val records = opsData.mapNotNull { dp ->
-            val parts = dp.key.removePrefix("appops:").split(":", limit = 2)
+            val parts = dp.key
+                .removePrefix("appops:")
+                .removePrefix("appop:")
+                .split(":", limit = 2)
             if (parts.size < 2) return@mapNotNull null
             val lastAccess = Regex(""""last_access_ms":(\d+)""").find(dp.value)
                 ?.groupValues?.get(1)?.toLongOrNull() ?: 0L
@@ -2858,7 +2861,31 @@ class InsightsViewModel @Inject constructor(
         val sevenDaysAgo = System.currentTimeMillis() - 7 * 86_400_000L
         val points = dao.byCollectorSince("voice_transcription", sevenDaysAgo, limit = 20_000)
         val windows = points.filter { it.key == "window_duration_ms" }
-        if (windows.isEmpty()) return null
+        if (windows.isEmpty()) {
+            val modelStatus = points
+                .filter { it.key == "model_status" }
+                .maxByOrNull { it.timestamp }
+            if (modelStatus != null) {
+                val expectedPath = points
+                    .filter { it.key == "model_expected_path" }
+                    .maxByOrNull { it.timestamp }
+                    ?.value
+                val message = if (modelStatus.value == "missing" && expectedPath != null) {
+                    "Voice model missing. Expected: $expectedPath"
+                } else {
+                    "Voice collector status: ${modelStatus.value}"
+                }
+                return VoiceContextInsight(
+                    samples7d = 0,
+                    conversationSamples = 0,
+                    avgSpeechDensityWpm = 0.0,
+                    topContexts = listOf("setup_needed" to 1),
+                    topTags = emptyList(),
+                    latestTranscript = message
+                )
+            }
+            return null
+        }
 
         val conversationCount = points
             .filter { it.key == "conversation_present" && it.value.equals("true", ignoreCase = true) }
