@@ -4,6 +4,13 @@
 
 A personal Android app that collects the same categories of device/behavioral/sensor data that third-party tracker SDKs typically harvest, but stores it only in a local SQLCipher-encrypted database for the device owner's own inspection. No network transmission of collected data ever leaves the device. No analytics, no telemetry, no crash reporting.
 
+The repo is public, so keep it code-only: never commit device exports, decrypted databases, screenshots containing personal data, keystores, salts, transcripts, logs, or local analysis outputs.
+
+Current app shape:
+- 31 opt-in collectors across device, behavioral, location, network, apps, sensors, and personal data.
+- 26 insight cards, including the last-72-hour Sleep Timeline and Voice Context.
+- Sleep inference uses phone inactivity plus available ambient light, ambient sound, and voice quietness evidence. Screen-off alone is not considered a strong signal.
+
 ## Non-negotiable rules
 
 1. **No network egress of collected data.** The `INTERNET` permission is currently declared only for public-IP lookup (one collector) and MUST NOT be used by any other code path. If you add a feature that needs network access, ask first.
@@ -13,6 +20,7 @@ A personal Android app that collects the same categories of device/behavioral/se
 5. **Every permission is gated behind in-app explanation.** No silent runtime requests. The rationale string is mandatory on every `Collector`.
 6. **DB passphrase never touches disk unencrypted** and is zeroed from memory after use (`CharArray.fill('\u0000')`, `ByteArray.fill(0)`).
 7. **No logging of collected DataPoints** to logcat in release builds. `BuildConfig.DEBUG` gates all verbose logging.
+8. **No personal artifacts in git.** Before making publicity or release changes, scan tracked files/history for `*.db`, `*.sqlite*`, exports, keystores, keys, transcripts, logs, and payload dumps.
 
 ## Stack
 
@@ -25,6 +33,7 @@ A personal Android app that collects the same categories of device/behavioral/se
 - kotlinx.coroutines + Flow
 - WorkManager 2.9.x for periodic collection
 - Argon2kt 1.6.x for KDF
+- Vosk for opt-in, on-device voice transcription windows
 - DataStore (Preferences) for settings — not SharedPreferences
 
 ## Architecture
@@ -42,7 +51,14 @@ Collector (interface)
             │
             ▼
         MirrorDatabase (SQLCipher Room)
-          └── data_points table (unified schema)
+          ├── data_points table (unified schema)
+          └── RetentionWorker (per-collector TTL)
+            │
+            ▼
+        InsightsViewModel
+          ├── async insight computations
+          ├── data provenance / confidence metadata
+          └── educational info panels in card headers
 ```
 
 Adding a new collector is a single-file operation:
@@ -74,12 +90,22 @@ One row per field. A single BuildInfoCollector poll produces ~15 rows. This is d
 - **RUNTIME**: Standard runtime permissions. Location, contacts, etc.
 - **SPECIAL_ACCESS**: User must manually enable in Settings. `PACKAGE_USAGE_STATS`, `BIND_NOTIFICATION_LISTENER_SERVICE`.
 - **RESTRICTED**: Play Store policy flag. `QUERY_ALL_PACKAGES`. Keep the list short and justified.
+- **ADB**: Development-only grants such as `READ_LOGS`, `GET_APP_OPS_STATS`, and `DUMP`. Never assume normal users have these.
+
+## Current notable collectors
+
+- `voice_transcription`: opt-in microphone collector using on-device Vosk. Stores transcript-derived signals and context tags locally; no raw audio is retained.
+- `ambient_sound`: opt-in microphone collector that stores only short-window aggregate loudness metrics (`ambient_sound_dbfs`, RMS, peak, label); no raw audio is retained.
+- `environment_sensor`: ambient light/proximity/pressure/temperature stream. Light data improves Sleep Timeline confidence.
+- `screen_state`: screen on/off events. Useful for inactivity windows, but weak alone.
+- ADB-backed collectors include logcat, AppOps audit, and system stats. They are for development/self-audit workflows, not Play Store-normal access.
 
 ## Commands
 
 See `.claude/commands/` for reusable slash commands:
 - `/build` — assembleDebug
-- `/install` — install to connected device + tail logcat
+- `/install` — install to connected device
+- `/grant-adb-permissions` — grant development-only ADB permissions
 - `/grant-usage-stats` — dev helper to grant PACKAGE_USAGE_STATS without the Settings walk
 - `/dump-db` — pull encrypted DB off device, decrypt to /tmp, open in sqlite3
 
@@ -90,6 +116,7 @@ See `.claude/commands/` for reusable slash commands:
 - Root-required features. Decided against.
 - Cloud sync. Decided against.
 - Multi-user / family account support. Single-user by design.
+- Raw audio retention. Decided against; microphone collectors must store only local derived signals unless explicitly redesigned.
 
 ## Code style
 
