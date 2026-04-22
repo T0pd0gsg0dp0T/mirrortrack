@@ -8,6 +8,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.pm.PackageInfoCompat
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -106,6 +108,7 @@ class SettingsViewModel @Inject constructor(
 
     fun toggleCollector(collectorId: String, enabled: Boolean) {
         viewModelScope.launch {
+            CollectorHealthTracker.clear(collectorId)
             prefs.setEnabled(collectorId, enabled)
             scheduler.refreshAll()
             // Backfill: immediately run the collector once when first enabled
@@ -205,7 +208,6 @@ class SettingsViewModel @Inject constructor(
         val declaredPerms = pkgInfo.requestedPermissions?.toList() ?: emptyList()
 
         val usedPerms = registry.all()
-            .filter { prefs.isEnabledSync(it.id) || it.defaultEnabled }
             .flatMap { it.requiredPermissions }
             .toSet()
 
@@ -216,6 +218,7 @@ class SettingsViewModel @Inject constructor(
             "POST_NOTIFICATIONS", "RECEIVE_BOOT_COMPLETED",
             "INTERNET", "ACCESS_NETWORK_STATE", "ACCESS_WIFI_STATE",
             "USE_BIOMETRIC", "WAKE_LOCK",
+            "USE_FINGERPRINT",
             "BIND_NOTIFICATION_LISTENER_SERVICE",
             "DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
         )
@@ -635,13 +638,17 @@ fun SettingsScreen(
             onDismissRequest = { showSelfAudit = false },
             title = { Text("Self-Audit") },
             text = {
-                Column(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                ) {
                     Text("Version: ${data.versionName} (${data.versionCode})", style = MaterialTheme.typography.bodySmall)
                     Text("Installer: ${data.installerSource}", style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.height(8.dp))
 
                     Text("Declared permissions: ${data.declaredPermissions.size}", style = MaterialTheme.typography.labelMedium)
-                    Text("Used by enabled collectors: ${data.usedPermissions.size}", style = MaterialTheme.typography.labelMedium)
+                    Text("Mapped collector permissions: ${data.usedPermissions.size}", style = MaterialTheme.typography.labelMedium)
 
                     if (data.unusedPermissions.isNotEmpty()) {
                         Spacer(Modifier.height(8.dp))

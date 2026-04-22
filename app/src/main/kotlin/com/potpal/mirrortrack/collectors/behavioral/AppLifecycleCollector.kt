@@ -1,6 +1,8 @@
 package com.potpal.mirrortrack.collectors.behavioral
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
@@ -94,8 +96,10 @@ class AppLifecycleCollector @Inject constructor(
         Logger.d("AppLifecycleCollector", "Registered lifecycle observer")
 
         awaitClose {
-            lifecycle.removeObserver(observer)
-            Logger.d("AppLifecycleCollector", "Removed lifecycle observer")
+            Handler(Looper.getMainLooper()).post {
+                lifecycle.removeObserver(observer)
+                Logger.d("AppLifecycleCollector", "Removed lifecycle observer")
+            }
         }
     }
 }

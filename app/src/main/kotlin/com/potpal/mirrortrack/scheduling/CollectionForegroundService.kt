@@ -18,6 +18,7 @@ import com.potpal.mirrortrack.settings.CollectorPreferences
 import com.potpal.mirrortrack.ui.MainActivity
 import com.potpal.mirrortrack.util.Logger
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -79,6 +80,8 @@ class CollectionForegroundService : Service() {
                                 ingestor.submit(point)
                                 CollectorHealthTracker.recordSuccess(collector.id)
                             }
+                        } catch (_: CancellationException) {
+                            Logger.d(TAG, "Stream ${collector.id} stopped")
                         } catch (e: Exception) {
                             Logger.w(TAG, "Stream ${collector.id} failed", e)
                             CollectorHealthTracker.recordFailure(collector.id, e.message ?: "unknown")
@@ -89,6 +92,7 @@ class CollectionForegroundService : Service() {
             } else {
                 streamJobs[collector.id]?.cancel()
                 streamJobs.remove(collector.id)
+                CollectorHealthTracker.clear(collector.id)
             }
         }
     }

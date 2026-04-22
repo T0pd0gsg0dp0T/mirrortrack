@@ -27,9 +27,12 @@ class LocationCollector @Inject constructor() : Collector {
     override val displayName = "Location"
     override val rationale =
         "Streams GPS/network location fixes using LocationManager directly (no Play Services). " +
-        "Requires ACCESS_FINE_LOCATION."
+        "Requires foreground location permissions."
     override val category = Category.LOCATION
-    override val requiredPermissions = listOf(Manifest.permission.ACCESS_FINE_LOCATION)
+    override val requiredPermissions = listOf(
+        Manifest.permission.ACCESS_COARSE_LOCATION,
+        Manifest.permission.ACCESS_FINE_LOCATION
+    )
     override val accessTier = AccessTier.RUNTIME
     override val defaultEnabled = false
     override val defaultPollInterval = null // streamed

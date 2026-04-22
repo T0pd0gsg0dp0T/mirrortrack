@@ -57,4 +57,10 @@ object CollectorHealthTracker {
             records.clear()
         }
     }
+
+    fun clear(collectorId: String) {
+        synchronized(records) {
+            records.remove(collectorId)
+        }
+    }
 }
