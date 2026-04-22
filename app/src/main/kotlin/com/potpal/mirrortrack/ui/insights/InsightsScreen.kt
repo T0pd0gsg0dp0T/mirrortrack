@@ -39,7 +39,9 @@ import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.DataUsage
 import androidx.compose.material.icons.filled.HealthAndSafety
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
@@ -89,7 +91,6 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -100,6 +101,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.time.Instant
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.pow
 
@@ -214,13 +217,12 @@ fun InsightsScreen(
                     item(key = "today") { TodayCard(today, meta["today"], diag) }
                 }
 
-                // Card 2: Sleep heatmap
-                if (state.sleepDays.isNotEmpty()) {
+                // Card 2: Sleep timeline
+                if (state.sleepDays.isNotEmpty() || state.sleepIntervals72h.isNotEmpty()) {
                     item(key = "sleep") {
-                        SleepHeatmapCard(
+                        SleepTimelineCard(
                             days = state.sleepDays,
-                            selectedDay = state.selectedSleepDay,
-                            onDaySelected = { viewModel.selectSleepDay(it) },
+                            intervals = state.sleepIntervals72h,
                             meta = meta["sleep"],
                             showDiagnostics = diag
                         )
@@ -359,6 +361,11 @@ fun InsightsScreen(
                     if (com.detected) {
                         item(key = "commute") { CommuteCard(com, meta["commute"], diag) }
                     }
+                }
+
+                // Card 27: Voice Context
+                state.voiceContext?.let { voice ->
+                    item(key = "voice") { VoiceContextCard(voice, meta["voice"], diag) }
                 }
 
                 item { Spacer(Modifier.height(16.dp)) }
@@ -528,162 +535,197 @@ private fun StatCell(icon: ImageVector, value: String, label: String) {
     }
 }
 
-// ── Card 2: Sleep heatmap ────────────────────────────────────────────
+// ── Card 2: Sleep timeline ───────────────────────────────────────────
 
 @Composable
-private fun SleepHeatmapCard(
+private fun SleepTimelineCard(
     days: List<SleepDay>,
-    selectedDay: SleepDay?,
-    onDaySelected: (SleepDay?) -> Unit,
+    intervals: List<SleepInterval>,
     meta: InsightMeta? = null,
     showDiagnostics: Boolean = false
 ) {
     InsightCardShell(title = "Sleep", icon = Icons.Default.Bed, accent = TerminalPurple, meta = meta, showDiagnostics = showDiagnostics) {
-        val dayLabels = listOf("M", "T", "W", "T", "F", "S", "S")
+        val now = remember(intervals) { System.currentTimeMillis() }
+        val windowMs = 72 * 3_600_000L
+        val windowStart = now - windowMs
+        val totalSleepMs = intervals.sumOf { it.durationMs }
+        val recentAverage = days
+            .takeLast(7)
+            .filter { it.sleepDurationHrs > 0.0 }
+            .map { it.sleepDurationHrs }
+            .average()
+            .takeIf { !it.isNaN() }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column {
+                Text("Last 72 hours", fontSize = 10.sp, color = DimGray, fontFamily = FontFamily.Monospace)
+                Text(
+                    formatDuration(totalSleepMs),
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    color = TerminalPurple
+                )
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text("${intervals.size} block${if (intervals.size == 1) "" else "s"}", fontSize = 10.sp, color = DimGray)
+                recentAverage?.let {
+                    Text(
+                        "7d avg ${"%.1f".format(it)}h",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
 
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(130.dp)
-                .pointerInput(days) {
-                    detectTapGestures { offset ->
-                        val labelW = size.width / 14f
-                        val cellW = (size.width - labelW) / 13f
-                        val cellH = size.height / 7f
-                        val col = ((offset.x - labelW) / cellW).toInt()
-                        val row = (offset.y / cellH).toInt()
-                        if (col in 0 until 13 && row in 0 until 7) {
-                            val idx = col * 7 + row
-                            if (idx in days.indices) {
-                                val day = days[idx]
-                                onDaySelected(if (selectedDay?.date == day.date) null else day)
-                            }
-                        }
-                    }
-                }
+                .height(72.dp)
         ) {
-            val cols = 13
-            val rows = 7
-            val labelWidth = size.width / 14f
-            val cellW = (size.width - labelWidth) / cols
-            val cellH = size.height / rows
-            val gap = 2f
+            val trackTop = size.height * 0.28f
+            val trackHeight = size.height * 0.38f
+            drawRoundRect(
+                color = CellEmpty,
+                topLeft = Offset(0f, trackTop),
+                size = Size(size.width, trackHeight),
+                cornerRadius = CornerRadius(10f, 10f)
+            )
 
-            // Day labels
-            for (r in 0 until rows) {
-                if (r % 2 == 0) {
-                    drawContext.canvas.nativeCanvas.drawText(
-                        dayLabels[r],
-                        labelWidth / 3f,
-                        r * cellH + cellH * 0.7f,
-                        android.graphics.Paint().apply {
-                            color = 0xFF484F58.toInt()
-                            textSize = cellH * 0.45f
-                            textAlign = android.graphics.Paint.Align.CENTER
-                        }
-                    )
-                }
-            }
-
-            // Grid cells
-            for (c in 0 until cols) {
-                for (r in 0 until rows) {
-                    val idx = c * 7 + r
-                    if (idx >= days.size) continue
-                    val day = days[idx]
-                    val cellColor = sleepColor(day.sleepDurationHrs)
-                    val isSelected = selectedDay?.date == day.date
-
-                    val x = labelWidth + c * cellW + gap
-                    val y = r * cellH + gap
-                    val w = cellW - gap * 2
-                    val h = cellH - gap * 2
-
-                    drawRoundRect(
-                        color = cellColor,
-                        topLeft = Offset(x, y),
-                        size = Size(w, h),
-                        cornerRadius = CornerRadius(3f, 3f)
-                    )
-
-                    if (isSelected) {
-                        drawRoundRect(
-                            color = Color.White,
-                            topLeft = Offset(x - 1, y - 1),
-                            size = Size(w + 2, h + 2),
-                            cornerRadius = CornerRadius(4f, 4f),
-                            style = Stroke(width = 2f)
-                        )
-                    }
-                }
-            }
-        }
-
-        // Legend
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Less", fontSize = 9.sp, color = DimGray)
-            Spacer(Modifier.width(4.dp))
-            listOf(0.0, 3.0, 5.0, 7.0, 9.0).forEach { hrs ->
-                Box(
-                    Modifier
-                        .size(10.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(sleepColor(hrs))
+            for (i in 0..3) {
+                val x = size.width * (i / 3f)
+                drawLine(
+                    color = DimGray.copy(alpha = if (i == 3) 0.65f else 0.35f),
+                    start = Offset(x, 0f),
+                    end = Offset(x, size.height),
+                    strokeWidth = 1f
                 )
-                Spacer(Modifier.width(2.dp))
             }
-            Spacer(Modifier.width(4.dp))
-            Text("More", fontSize = 9.sp, color = DimGray)
+
+            intervals.forEach { interval ->
+                val startFraction = ((interval.startMs - windowStart).toDouble() / windowMs).coerceIn(0.0, 1.0)
+                val endFraction = ((interval.endMs - windowStart).toDouble() / windowMs).coerceIn(0.0, 1.0)
+                val x1 = (startFraction * size.width).toFloat()
+                val x2 = (endFraction * size.width).toFloat()
+                drawRoundRect(
+                    color = sleepConfidenceColor(interval.confidence),
+                    topLeft = Offset(x1, trackTop),
+                    size = Size((x2 - x1).coerceAtLeast(3f), trackHeight),
+                    cornerRadius = CornerRadius(10f, 10f)
+                )
+            }
         }
 
-        // Selected day detail
-        if (selectedDay != null && selectedDay.sleepDurationHrs > 0) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            listOf(0L, 24L, 48L, 72L).forEach { hours ->
+                Text(
+                    formatTimelineLabel(windowStart + hours * 3_600_000L),
+                    fontSize = 9.sp,
+                    color = DimGray,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        }
+
+        if (intervals.isEmpty()) {
             Spacer(Modifier.height(8.dp))
             HorizontalDivider(color = DimGray.copy(alpha = 0.4f))
             Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Text(
-                        selectedDay.date.format(DateTimeFormatter.ofPattern("EEE, MMM d")),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        "${"%.1f".format(selectedDay.sleepDurationHrs)}h sleep",
-                        fontSize = 11.sp,
-                        color = TerminalPurple,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-                Column(horizontalAlignment = Alignment.End) {
-                    if (selectedDay.bedtimeHour != null) {
-                        Text("Bed ${formatHour(selectedDay.bedtimeHour)}", fontSize = 11.sp, color = DimGray, fontFamily = FontFamily.Monospace)
-                    }
-                    if (selectedDay.wakeHour != null) {
-                        Text("Wake ${formatHour(selectedDay.wakeHour)}", fontSize = 11.sp, color = DimGray, fontFamily = FontFamily.Monospace)
-                    }
-                }
+            Text(
+                "No likely sleep blocks found in the last 72 hours.",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            Spacer(Modifier.height(10.dp))
+            intervals.takeLast(4).forEach { interval ->
+                SleepIntervalRow(interval)
+            }
+            if (intervals.size > 4) {
+                Text(
+                    "+${intervals.size - 4} earlier block${if (intervals.size - 4 == 1) "" else "s"}",
+                    fontSize = 10.sp,
+                    color = DimGray,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
             }
         }
     }
 }
 
-private fun sleepColor(hours: Double): Color = when {
-    hours <= 0.0 -> CellEmpty
-    hours < 4.0 -> TerminalRed.copy(alpha = 0.7f)
-    hours < 6.0 -> TerminalAmber.copy(alpha = 0.7f)
-    hours < 7.5 -> TerminalBlue.copy(alpha = 0.7f)
-    hours < 9.0 -> TerminalGreen.copy(alpha = 0.8f)
-    else -> TerminalPurple.copy(alpha = 0.7f)
+@Composable
+private fun SleepIntervalRow(interval: SleepInterval) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .size(width = 8.dp, height = 28.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(sleepConfidenceColor(interval.confidence))
+        )
+        Spacer(Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                "${formatTimelineTime(interval.startMs)} - ${formatTimelineTime(interval.endMs)}",
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                interval.evidence.joinToString(" + "),
+                fontSize = 9.sp,
+                color = DimGray,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                formatDuration(interval.durationMs),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = TerminalPurple
+            )
+            Text(
+                "${(interval.confidence * 100).toInt()}%",
+                fontSize = 9.sp,
+                color = sleepConfidenceColor(interval.confidence),
+                fontFamily = FontFamily.Monospace
+            )
+        }
+    }
 }
+
+private fun sleepConfidenceColor(confidence: Double): Color = when {
+    confidence >= 0.8 -> TerminalPurple.copy(alpha = 0.9f)
+    confidence >= 0.6 -> TerminalBlue.copy(alpha = 0.85f)
+    else -> TerminalAmber.copy(alpha = 0.85f)
+}
+
+private fun formatTimelineLabel(timestampMs: Long): String =
+    Instant.ofEpochMilli(timestampMs)
+        .atZone(ZoneId.systemDefault())
+        .format(DateTimeFormatter.ofPattern("EEE ha"))
+
+private fun formatTimelineTime(timestampMs: Long): String =
+    Instant.ofEpochMilli(timestampMs)
+        .atZone(ZoneId.systemDefault())
+        .format(DateTimeFormatter.ofPattern("EEE h:mm a"))
 
 // ── Card 3: App attention ────────────────────────────────────────────
 
@@ -754,6 +796,7 @@ private fun AppAttentionCard(apps: List<AppAttention>, meta: InsightMeta? = null
 
 @Composable
 private fun AnomalyCard(anomaly: Anomaly, onDismiss: () -> Unit) {
+    var infoExpanded by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -792,6 +835,21 @@ private fun AnomalyCard(anomaly: Anomaly, onDismiss: () -> Unit) {
                     fontSize = 9.sp,
                     color = DimGray,
                     fontFamily = FontFamily.Monospace
+                )
+                if (infoExpanded) {
+                    EducationalInfoPanel(
+                        text = educationalInfoForTitle("Anomaly Feed"),
+                        accent = TerminalAmber,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+            }
+            IconButton(onClick = { infoExpanded = !infoExpanded }, modifier = Modifier.size(28.dp)) {
+                Icon(
+                    Icons.Default.Info,
+                    "Explain anomaly card",
+                    tint = if (infoExpanded) TerminalAmber else DimGray,
+                    modifier = Modifier.size(16.dp)
                 )
             }
             IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
@@ -1520,9 +1578,11 @@ private fun AppCompulsionCard(apps: List<AppCompulsion>, meta: InsightMeta? = nu
 private fun DeviceHealthCard(health: DeviceHealth, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
     InsightCardShell(title = "Device Health", icon = Icons.Default.Memory, accent = TerminalGreen, meta = meta, showDiagnostics = showDiagnostics) {
         // RAM gauge
+        val hasRamData = health.ramUsedPct > 0.0
         val ramColor = when {
             health.ramUsedPct >= 90 -> TerminalRed
             health.ramUsedPct >= 75 -> TerminalAmber
+            !hasRamData -> DimGray
             else -> TerminalGreen
         }
 
@@ -1533,7 +1593,7 @@ private fun DeviceHealthCard(health: DeviceHealth, meta: InsightMeta? = null, sh
         ) {
             Text("RAM", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(
-                "${"%.0f".format(health.ramUsedPct)}%",
+                if (hasRamData) "${"%.0f".format(health.ramUsedPct)}%" else "---",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace,
@@ -1549,14 +1609,22 @@ private fun DeviceHealthCard(health: DeviceHealth, meta: InsightMeta? = null, sh
         ) {
             Box(
                 Modifier
-                    .fillMaxWidth(fraction = (health.ramUsedPct / 100.0).toFloat().coerceIn(0f, 1f))
+                    .fillMaxWidth(fraction = if (hasRamData) (health.ramUsedPct / 100.0).toFloat().coerceIn(0f, 1f) else 1f)
                     .height(6.dp)
                     .clip(RoundedCornerShape(3.dp))
-                    .background(ramColor)
+                    .background(if (hasRamData) ramColor else DimGray.copy(alpha = 0.35f))
             )
         }
 
-        if (health.memoryTrend != 0.0) {
+        if (!hasRamData) {
+            Text(
+                "RAM/process detail unavailable",
+                fontSize = 9.sp,
+                fontFamily = FontFamily.Monospace,
+                color = DimGray,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        } else if (health.memoryTrend != 0.0) {
             val sign = if (health.memoryTrend > 0) "+" else ""
             Text(
                 "$sign${"%.1f".format(health.memoryTrend)}% over 24h",
@@ -1576,9 +1644,9 @@ private fun DeviceHealthCard(health: DeviceHealth, meta: InsightMeta? = null, sh
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            StatCell(Icons.Default.Smartphone, "${health.processCount}", "processes")
-            StatCell(Icons.Default.Storage, "${health.foregroundCount}", "foreground")
-            StatCell(Icons.Default.Storage, "${health.backgroundCount}", "background")
+            StatCell(Icons.Default.Smartphone, if (hasRamData) "${health.processCount}" else "---", "processes")
+            StatCell(Icons.Default.Storage, if (hasRamData) "${health.foregroundCount}" else "---", "foreground")
+            StatCell(Icons.Default.Storage, if (hasRamData) "${health.backgroundCount}" else "---", "background")
         }
 
         Spacer(Modifier.height(8.dp))
@@ -2695,6 +2763,8 @@ private fun InsightCardShell(
     showDiagnostics: Boolean = false,
     content: @Composable () -> Unit
 ) {
+    var infoExpanded by remember { mutableStateOf(false) }
+    val educationalInfo = educationalInfoForTitle(title)
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
@@ -2719,6 +2789,15 @@ private fun InsightCardShell(
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f)
                 )
+                IconButton(onClick = { infoExpanded = !infoExpanded }, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        Icons.Default.Info,
+                        "Explain $title",
+                        tint = if (infoExpanded) accent else DimGray,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+                Spacer(Modifier.width(4.dp))
                 // Confidence + staleness badges
                 if (meta != null) {
                     if (meta.isStale) {
@@ -2762,6 +2841,10 @@ private fun InsightCardShell(
                         ConfidenceTier.HIGH -> { /* no badge for high confidence */ }
                     }
                 }
+            }
+            if (infoExpanded) {
+                Spacer(Modifier.height(8.dp))
+                EducationalInfoPanel(text = educationalInfo, accent = accent)
             }
             // Data source + diagnostic info
             if (meta != null && showDiagnostics) {
@@ -2812,6 +2895,164 @@ private fun InsightCardShell(
             }
             Spacer(Modifier.height(12.dp))
             content()
+        }
+    }
+}
+
+@Composable
+private fun EducationalInfoPanel(
+    text: String,
+    accent: Color,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(accent.copy(alpha = 0.08f))
+            .padding(10.dp)
+    ) {
+        Text(
+            "HOW TO READ THIS",
+            fontSize = 9.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            color = accent,
+            letterSpacing = 1.sp
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text,
+            fontSize = 11.sp,
+            lineHeight = 15.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+private fun educationalInfoForTitle(title: String): String = when (title) {
+    "Today" ->
+        "Shows the current collection baseline: volume of data, unlock count, screen time, step delta, battery change, and active collectors. Trackers use the same daily totals to estimate engagement level, device dependence, mobility, and whether a device is currently a rich source of fresh behavior data."
+
+    "Sleep" ->
+        "Shows the last 72 hours as a timeline. Likely sleep blocks start with long phone inactivity, then become more confident when ambient light is low and ambient sound or speech activity is quiet. It is still an inference, not sleep physiology. Profilers use this kind of signal to estimate bedtime, wake time, shift work, insomnia patterns, and when a person is most reachable."
+
+    "App Attention (7d)" ->
+        "Ranks apps by foreground time over the last week and compares them with an earlier baseline. Long foreground time suggests attention, interest, dependency, or task focus. Profilers use this to infer entertainment habits, work tools, shopping intent, news interest, and changes in routine."
+
+    "Anomaly Feed" ->
+        "Flags behavior that deviates from the recent baseline, such as unusual unlock volume, late activity, or battery drain. Anomalies are useful because sudden changes often reveal travel, stress, schedule disruption, illness, outages, or a new app/workflow."
+
+    "Location Clusters" ->
+        "Groups repeated GPS fixes into places. High-count clusters often become home, work, school, gym, or shopping locations after time-of-day analysis. Location clusters are among the strongest signals for identity, lifestyle, commute, income context, and routine predictability."
+
+    "Unlock After Notification" ->
+        "Measures how quickly notifications lead to an unlock. Short latency and high response rates suggest which apps can interrupt you and when. Engagement systems use this to rank notification effectiveness, urgency, habit strength, and social pressure."
+
+    "Fingerprint Stability" ->
+        "Tracks device identity fields and when they change. Stable fields are useful for recognizing the same device over time; changes can indicate updates, resets, spoofing, device migration, or privacy interventions. Fingerprinting systems combine many ordinary fields to make a device recognizable."
+
+    "Monthly Trends" ->
+        "Compares behavior across months: data volume, daily unlocks, screen time, and steps. Long-range trends show whether attention, mobility, and collection coverage are rising or falling. These shifts are often more useful than a single day because they reveal durable lifestyle changes."
+
+    "Engagement Score" ->
+        "Summarizes daily and weekly activity into stickiness: active days, sessions per day, session duration, and retention flags. Product analytics systems use this to decide whether someone is casual, habitual, at risk of churn, or highly engaged."
+
+    "Privacy Radar" ->
+        "Scores apps by sensitive access patterns such as camera, microphone, location, and contacts. A high score means an app touches more personal surfaces or does so more often. This mirrors privacy-risk ranking used in app audits and mobile threat analysis."
+
+    "Data Flow" ->
+        "Shows per-app network send and receive volume. Upload-heavy apps can indicate sync, backups, telemetry, media sharing, or possible data exfiltration. Network-flow analysis helps infer which apps are active even when their UI is not visible."
+
+    "App Compulsion Index" ->
+        "Looks for repeated launches and short gaps between launches. High launch frequency with small intervals can suggest checking loops, habit strength, boredom, or task switching. Consumer analytics often uses this pattern to measure dependency and compulsion."
+
+    "Device Health" ->
+        "Summarizes memory pressure, process counts, thermal state, uptime, and memory trend when system data is available. If only battery fallback data exists, RAM and process fields are shown as unknown. Device health can explain behavior gaps and reveal whether the phone is under load, hot, or recently restarted."
+
+    "Identity Entropy" ->
+        "Estimates how identifying a device fingerprint is by assigning rough entropy to fields like model, hardware, identifiers, and configuration. More entropy means fewer devices look the same. Fingerprinters combine weak fields because the combination can become highly unique."
+
+    "Home & Work" ->
+        "Uses repeated location clusters and time-of-day patterns to infer likely home and work places. Nighttime dwell usually points to home; weekday daytime dwell often points to work. This is one of the standard methods for inferring life structure from raw location trails."
+
+    "Circadian Rhythm" ->
+        "Builds a 24-hour activity profile from unlocks or fallback activity events. Peak and quiet hours reveal chronotype, shift work, and daily availability. Behavioral targeting systems use circadian timing to decide when messages are most likely to get attention."
+
+    "Routine Predictability" ->
+        "Measures how similar your hourly activity patterns are across days and how much weekday behavior differs from weekend behavior. Predictable routines make future behavior easier to forecast; irregular routines reduce confidence and require more recent data."
+
+    "Social Pressure" ->
+        "Connects notifications with subsequent unlocks by app. High notification count plus fast response suggests an app or contact channel has strong pull. This can reveal social obligations, work responsiveness, messaging habits, and vulnerability to interruption."
+
+    "App Portfolio" ->
+        "Classifies installed apps into broad categories and derives demographic or lifestyle hints from the mix. Finance, parenting, fitness, dating, gaming, productivity, and travel apps all create profile signals even if the apps are never opened during collection."
+
+    "Charging Behavior" ->
+        "Examines charge starts, depth of discharge, overnight charging, and charge duration. Charging patterns reveal sleep routine, commute constraints, battery anxiety, device age, and whether someone is usually near stable power."
+
+    "WiFi Footprint" ->
+        "Counts unique WiFi networks, repeated SSIDs, and overnight networks. A stable overnight network can imply home; many networks imply mobility. WiFi history is a strong location proxy even without GPS because networks anchor visits to real places."
+
+    "Session Fragmentation" ->
+        "Estimates how often attention switches between apps and how long focus stays in one place. High fragmentation suggests multitasking, distraction, or rapid checking. Low fragmentation suggests deeper focus or longer task sessions."
+
+    "Dwell Times" ->
+        "Measures how long the device stays around each location cluster and how often visits recur. Dwell duration helps classify places: home, work, transit, retail, social, or other recurring stops. Time spent is often more revealing than location alone."
+
+    "Weekday vs Weekend" ->
+        "Compares workweek and weekend behavior: unlocks, screen time, and top apps. Differences reveal work schedule, leisure habits, commuting changes, and whether weekdays or weekends carry more device dependence."
+
+    "Income Inference" ->
+        "Combines device tier, carrier signals, and app portfolio hints into a rough socioeconomic profile. This is probabilistic and imperfect, but advertisers often use device price, carrier type, and installed app categories as income proxies."
+
+    "Commute Pattern" ->
+        "Detects repeated transitions between likely home and work clusters. Departure time, return time, duration, transport mode, and consistency reveal schedule stability and travel constraints. Commute regularity is a strong predictor of future location."
+
+    "Voice Context" ->
+        "Summarizes local speech transcription windows into conversation presence, speech density, context labels, and tags. The app discards audio and stores text-derived signals locally. Speech context can help distinguish quiet time, meetings, travel, errands, media playback, and social interaction."
+
+    else ->
+        "Explains what this card infers, which signals support it, and why the pattern is useful for behavioral profiling. Treat every result as probabilistic: stronger data coverage raises confidence, while sparse or stale data should be read cautiously."
+}
+
+@Composable
+private fun VoiceContextCard(data: VoiceContextInsight, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    InsightCardShell(title = "Voice Context", icon = Icons.Default.Mic, accent = TerminalBlue, meta = meta, showDiagnostics = showDiagnostics) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            StatCell(Icons.Default.Mic, "${data.conversationSamples}/${data.samples7d}", "speech windows")
+            StatCell(Icons.Default.Speed, "${"%.0f".format(data.avgSpeechDensityWpm)}", "words/min")
+        }
+        if (data.topContexts.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
+            Text("Contexts", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = DimGray)
+            Spacer(Modifier.height(4.dp))
+            data.topContexts.take(4).forEach { (context, count) ->
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(context.replace('_', ' '), fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurface)
+                    Text("$count", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = TerminalBlue)
+                }
+            }
+        }
+        if (data.topTags.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                data.topTags.joinToString("  ") { (tag, count) -> "$tag:$count" },
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                color = TerminalAmber
+            )
+        }
+        data.latestTranscript?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                it,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                color = DimGray,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

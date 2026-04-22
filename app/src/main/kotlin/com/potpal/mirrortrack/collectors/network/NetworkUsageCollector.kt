@@ -7,7 +7,6 @@ import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.os.Build
 import android.os.Process
-import android.telephony.TelephonyManager
 import com.potpal.mirrortrack.collectors.AccessTier
 import com.potpal.mirrortrack.collectors.Category
 import com.potpal.mirrortrack.collectors.Collector
@@ -70,13 +69,6 @@ class NetworkUsageCollector @Inject constructor() : Collector {
         val now = System.currentTimeMillis()
         val oneDayAgo = now - 86_400_000L
 
-        // Get subscriber ID for mobile stats (may be null)
-        val subscriberId = try {
-            val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
-            @Suppress("DEPRECATION")
-            tm?.subscriberId
-        } catch (_: SecurityException) { null }
-
         // Query WiFi usage per UID
         val wifiUsage = mutableMapOf<Int, Pair<Long, Long>>() // uid -> (rx, tx)
         try {
@@ -97,22 +89,20 @@ class NetworkUsageCollector @Inject constructor() : Collector {
 
         // Query mobile usage per UID
         val mobileUsage = mutableMapOf<Int, Pair<Long, Long>>()
-        if (subscriberId != null) {
-            try {
-                val mobileBucket = nsm.querySummary(
-                    ConnectivityManager.TYPE_MOBILE, subscriberId, oneDayAgo, now
-                )
-                val bucket = android.app.usage.NetworkStats.Bucket()
-                while (mobileBucket.hasNextBucket()) {
-                    mobileBucket.getNextBucket(bucket)
-                    val uid = bucket.uid
-                    val (prevRx, prevTx) = mobileUsage[uid] ?: (0L to 0L)
-                    mobileUsage[uid] = (prevRx + bucket.rxBytes) to (prevTx + bucket.txBytes)
-                }
-                mobileBucket.close()
-            } catch (e: Exception) {
-                Logger.w(TAG, "Mobile stats query failed", e)
+        try {
+            val mobileBucket = nsm.querySummary(
+                ConnectivityManager.TYPE_MOBILE, null, oneDayAgo, now
+            )
+            val bucket = android.app.usage.NetworkStats.Bucket()
+            while (mobileBucket.hasNextBucket()) {
+                mobileBucket.getNextBucket(bucket)
+                val uid = bucket.uid
+                val (prevRx, prevTx) = mobileUsage[uid] ?: (0L to 0L)
+                mobileUsage[uid] = (prevRx + bucket.rxBytes) to (prevTx + bucket.txBytes)
             }
+            mobileBucket.close()
+        } catch (e: Exception) {
+            Logger.w(TAG, "Mobile stats query failed", e)
         }
 
         // Merge UIDs and resolve package names

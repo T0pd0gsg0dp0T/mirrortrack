@@ -25,6 +25,8 @@ import com.potpal.mirrortrack.collectors.network.WifiCollector
 import com.potpal.mirrortrack.collectors.personal.CalendarCollector
 import com.potpal.mirrortrack.collectors.personal.ContactsCollector
 import com.potpal.mirrortrack.collectors.personal.MediaExifCollector
+import com.potpal.mirrortrack.collectors.personal.VoiceTranscriptionCollector
+import com.potpal.mirrortrack.collectors.sensors.AmbientSoundCollector
 import com.potpal.mirrortrack.collectors.sensors.BodySensorsCollector
 import com.potpal.mirrortrack.collectors.sensors.EnvironmentSensorCollector
 import com.potpal.mirrortrack.collectors.sensors.MotionSensorCollector
@@ -97,7 +99,9 @@ object CollectorRegistryModule {
         calendar: CalendarCollector,
         contacts: ContactsCollector,
         mediaExif: MediaExifCollector,
+        voiceTranscription: VoiceTranscriptionCollector,
         // --- SENSORS ---
+        ambientSound: AmbientSoundCollector,
         bodySensors: BodySensorsCollector,
         environmentSensor: EnvironmentSensorCollector,
         motionSensor: MotionSensorCollector,
@@ -130,11 +134,13 @@ object CollectorRegistryModule {
         ip,
         networkUsage,
         wifi,
-        // Personal
+        // Personal (4 — includes opt-in voice transcription)
         calendar,
         contacts,
         mediaExif,
+        voiceTranscription,
         // Sensors
+        ambientSound,
         bodySensors,
         environmentSensor,
         motionSensor,

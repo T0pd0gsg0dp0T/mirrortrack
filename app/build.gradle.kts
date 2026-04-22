@@ -128,6 +128,9 @@ dependencies {
     // ExifInterface
     implementation(libs.androidx.exifinterface)
 
+    // Offline speech recognition. Vosk runs on-device and does not send audio out.
+    implementation(libs.vosk.android)
+
     // Test
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

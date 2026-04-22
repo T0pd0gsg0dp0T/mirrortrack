@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.pm.PackageInfoCompat
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -211,6 +212,7 @@ class SettingsViewModel @Inject constructor(
         // Infrastructure permissions not tied to any collector — exclude from audit
         val infraPerms = setOf(
             "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_SPECIAL_USE",
+            "FOREGROUND_SERVICE_MICROPHONE",
             "POST_NOTIFICATIONS", "RECEIVE_BOOT_COMPLETED",
             "INTERNET", "ACCESS_NETWORK_STATE", "ACCESS_WIFI_STATE",
             "USE_BIOMETRIC", "WAKE_LOCK",
@@ -231,7 +233,7 @@ class SettingsViewModel @Inject constructor(
             unusedPermissions = unusedPerms,
             writeCounts24h = writeCounts.associate { it.collectorId to it.cnt },
             versionName = pkgInfo.versionName ?: "unknown",
-            versionCode = pkgInfo.longVersionCode,
+            versionCode = PackageInfoCompat.getLongVersionCode(pkgInfo),
             installerSource = pm.getInstallerPackageName(context.packageName) ?: "unknown"
         )
     }

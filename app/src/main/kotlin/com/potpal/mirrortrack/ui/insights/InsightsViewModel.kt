@@ -15,6 +15,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -73,7 +76,7 @@ object InsightDependencyGraph {
 
     val cards: List<CardDeps> = listOf(
         CardDeps("Today", listOf("screen_state", "steps", "battery"), listOf("app_lifecycle", "usage_stats", "motion_sensor")),
-        CardDeps("Sleep", listOf("screen_state"), listOf("app_lifecycle")),
+        CardDeps("Sleep", listOf("screen_state", "environment_sensor", "ambient_sound"), listOf("app_lifecycle", "voice_transcription")),
         CardDeps("App Attention", listOf("usage_stats"), listOf("logcat")),
         CardDeps("Anomalies", listOf("screen_state"), listOf("app_lifecycle")),
         CardDeps("Location Clusters", listOf("location"), emptyList()),
@@ -87,8 +90,8 @@ object InsightDependencyGraph {
         CardDeps("Device Health", listOf("system_stats"), listOf("battery")),
         CardDeps("Identity Entropy", listOf("build_info", "hardware", "identifiers"), emptyList()),
         CardDeps("Home/Work", listOf("location"), emptyList()),
-        CardDeps("Circadian", listOf("screen_state"), listOf("app_lifecycle", "logcat")),
-        CardDeps("Routine", listOf("screen_state"), listOf("app_lifecycle", "logcat")),
+        CardDeps("Circadian", listOf("screen_state"), listOf("app_lifecycle", "logcat", "voice_transcription")),
+        CardDeps("Routine", listOf("screen_state"), listOf("app_lifecycle", "logcat", "voice_transcription")),
         CardDeps("Social Pressure", listOf("notification_listener", "screen_state"), listOf("app_lifecycle")),
         CardDeps("App Portfolio", listOf("installed_apps"), listOf("usage_stats", "logcat")),
         CardDeps("Charging", listOf("battery"), emptyList()),
@@ -97,7 +100,8 @@ object InsightDependencyGraph {
         CardDeps("Dwell Times", listOf("location"), emptyList()),
         CardDeps("Weekday/Weekend", listOf("screen_state", "usage_stats"), listOf("app_lifecycle")),
         CardDeps("Income", listOf("build_info", "carrier", "installed_apps"), listOf("connectivity", "usage_stats", "logcat")),
-        CardDeps("Commute", listOf("location"), emptyList())
+        CardDeps("Commute", listOf("location"), emptyList()),
+        CardDeps("Voice Context", listOf("voice_transcription"), emptyList())
     )
 
     /** Returns how many insight cards this collector feeds (primary + fallback). */
@@ -119,7 +123,7 @@ data class InsightsState(
     val loading: Boolean = true,
     val today: TodayData? = null,
     val sleepDays: List<SleepDay> = emptyList(),
-    val selectedSleepDay: SleepDay? = null,
+    val sleepIntervals72h: List<SleepInterval> = emptyList(),
     val appAttention: List<AppAttention> = emptyList(),
     val anomalies: List<Anomaly> = emptyList(),
     val locationClusters: List<LocationCluster> = emptyList(),
@@ -147,6 +151,7 @@ data class InsightsState(
     val weekdayWeekend: WeekdayWeekendDelta? = null,
     val income: IncomeInference? = null,
     val commute: CommutePattern? = null,
+    val voiceContext: VoiceContextInsight? = null,
     // Collection summary
     val categoryCounts: List<CategoryCount> = emptyList(),
     val totalDataPoints: Long = 0L,
@@ -177,6 +182,16 @@ data class SleepDay(
     val sleepDurationHrs: Double,
     val bedtimeHour: Double?,
     val wakeHour: Double?
+)
+
+data class SleepInterval(
+    val startMs: Long,
+    val endMs: Long,
+    val durationMs: Long,
+    val confidence: Double,
+    val evidence: List<String>,
+    val averageLux: Double?,
+    val averageSoundDbfs: Double?
 )
 
 data class AppAttention(
@@ -378,6 +393,15 @@ data class CommutePattern(
     val consistencyScore: Double        // 0.0–1.0
 )
 
+data class VoiceContextInsight(
+    val samples7d: Int,
+    val conversationSamples: Int,
+    val avgSpeechDensityWpm: Double,
+    val topContexts: List<Pair<String, Int>>,
+    val topTags: List<Pair<String, Int>>,
+    val latestTranscript: String?
+)
+
 // ── ViewModel ────────────────────────────────────────────────────────
 
 @HiltViewModel
@@ -510,6 +534,7 @@ class InsightsViewModel @Inject constructor(
 
             val todayDef = async { computeToday() }
             val sleepDef = async { computeSleep() }
+            val sleepIntervalsDef = async { computeSleepIntervals72h() }
             val appsDef = async { computeAppAttention() }
             val anomalyDef = async { computeAnomalies() }
             val locDef = async { computeLocationClusters() }
@@ -534,9 +559,11 @@ class InsightsViewModel @Inject constructor(
             val wdweDef = async { computeWeekdayWeekend() }
             val incomeDef = async { computeIncome() }
             val commuteDef = async { computeCommute() }
+            val voiceDef = async { computeVoiceContext() }
 
             val today = todayDef.await()
             val sleepDays = sleepDef.await()
+            val sleepIntervals72h = sleepIntervalsDef.await()
             val appAttention = appsDef.await()
             val anomalies = anomalyDef.await()
             val locationClusters = locDef.await()
@@ -561,6 +588,7 @@ class InsightsViewModel @Inject constructor(
             val weekdayWeekend = wdweDef.await()
             val income = incomeDef.await()
             val commute = commuteDef.await()
+            val voiceContext = voiceDef.await()
 
             // Auto-generate metadata for any card not already tracked by buildMeta
             autoMeta("engagement", engagement != null, listOf("screen_state"), listOf("app_lifecycle"))
@@ -570,8 +598,8 @@ class InsightsViewModel @Inject constructor(
             autoMeta("health", deviceHealth != null, listOf("system_stats"), listOf("battery"))
             autoMeta("entropy", identityEntropy != null, listOf("build_info", "hardware", "identifiers"), emptyList())
             autoMeta("homework", homeWork != null, listOf("location"), emptyList())
-            autoMeta("circadian", circadian != null, listOf("screen_state"), listOf("app_lifecycle", "logcat"))
-            autoMeta("routine", routine != null, listOf("screen_state"), listOf("app_lifecycle", "logcat"))
+            autoMeta("circadian", circadian != null, listOf("screen_state"), listOf("app_lifecycle", "logcat", "voice_transcription"))
+            autoMeta("routine", routine != null, listOf("screen_state"), listOf("app_lifecycle", "logcat", "voice_transcription"))
             autoMeta("social", socialPressure.isNotEmpty(), listOf("notification_listener", "screen_state"), listOf("app_lifecycle"))
             autoMeta("portfolio", appPortfolio != null, listOf("installed_apps"), listOf("usage_stats", "logcat"))
             autoMeta("charging", charging != null, listOf("battery"), emptyList())
@@ -581,6 +609,7 @@ class InsightsViewModel @Inject constructor(
             autoMeta("weekdayweekend", weekdayWeekend != null, listOf("screen_state", "usage_stats"), listOf("app_lifecycle"))
             autoMeta("income", income != null, listOf("build_info", "carrier"), listOf("connectivity", "usage_stats"))
             autoMeta("commute", commute?.detected == true, listOf("location"), emptyList())
+            autoMeta("voice", voiceContext != null, listOf("voice_transcription"), emptyList())
 
             _state.update { it.copy(
                 loading = false,
@@ -588,6 +617,7 @@ class InsightsViewModel @Inject constructor(
                 totalDataPoints = totalDef.await(),
                 today = today,
                 sleepDays = sleepDays,
+                sleepIntervals72h = sleepIntervals72h,
                 appAttention = appAttention,
                 anomalies = anomalies,
                 locationClusters = locationClusters,
@@ -612,13 +642,10 @@ class InsightsViewModel @Inject constructor(
                 weekdayWeekend = weekdayWeekend,
                 income = income,
                 commute = commute,
+                voiceContext = voiceContext,
                 cardMeta = metaAccumulator.toMap()
             ) }
         }
-    }
-
-    fun selectSleepDay(day: SleepDay?) {
-        _state.update { it.copy(selectedSleepDay = day) }
     }
 
     fun dismissAnomaly(id: String) {
@@ -796,15 +823,28 @@ class InsightsViewModel @Inject constructor(
             val nightEnd = date.atTime(12, 0)
                 .atZone(zone).toInstant().toEpochMilli()
 
-            val nightGaps = gaps.filter { g ->
-                g.offTime < nightEnd && g.onTime > nightStart
+            data class NightSleepGap(
+                val bedtimeMs: Long,
+                val wakeMs: Long,
+                val durationMs: Long
+            )
+
+            val nightGaps = gaps.mapNotNull { g ->
+                val clippedStart = maxOf(g.offTime, nightStart)
+                val clippedEnd = minOf(g.onTime, nightEnd)
+                val clippedDuration = clippedEnd - clippedStart
+                if (clippedDuration > 2 * 3_600_000) {
+                    NightSleepGap(clippedStart, clippedEnd, clippedDuration)
+                } else {
+                    null
+                }
             }
 
             val longestGap = nightGaps.maxByOrNull { it.durationMs }
 
-            if (longestGap != null && longestGap.durationMs > 2 * 3_600_000) {
-                val bedtime = hourOfDay(longestGap.offTime)
-                val wake = hourOfDay(longestGap.onTime)
+            if (longestGap != null) {
+                val bedtime = hourOfDay(longestGap.bedtimeMs)
+                val wake = hourOfDay(longestGap.wakeMs)
                 result.add(SleepDay(
                     date = date,
                     sleepDurationHrs = longestGap.durationMs / 3_600_000.0,
@@ -819,6 +859,187 @@ class InsightsViewModel @Inject constructor(
         buildMeta("sleep", source, events.size, events.maxOfOrNull { it.timestamp } ?: 0L, attempted,
             staleThresholdMs = 86_400_000L)
         return result
+    }
+
+    private suspend fun computeSleepIntervals72h(): List<SleepInterval> {
+        val now = System.currentTimeMillis()
+        val windowStart = now - 72 * 3_600_000L
+        val lookbackStart = windowStart - 12 * 3_600_000L
+
+        var events = dao.byCollectorKeySince("screen_state", "event", lookbackStart)
+            .sortedBy { it.timestamp }
+
+        if (events.size < 4) {
+            val lifecycle = dao.byCollectorSince("app_lifecycle", lookbackStart)
+                .sortedBy { it.timestamp }
+            if (lifecycle.size >= 4) {
+                events = lifecycle.mapNotNull { dp ->
+                    when (dp.key) {
+                        "app_foreground" -> dp.copy(value = "screen_on")
+                        "app_background" -> dp.copy(value = "screen_off")
+                        else -> null
+                    }
+                }.sortedBy { it.timestamp }
+            }
+        }
+
+        if (events.size < 2) return emptyList()
+
+        val lightSamples = dao.byCollectorKeySince(
+            "environment_sensor",
+            "ambient_light_lux",
+            lookbackStart
+        ).sortedBy { it.timestamp }
+        val soundSamples = dao.byCollectorKeySince(
+            "ambient_sound",
+            "ambient_sound_dbfs",
+            lookbackStart
+        ).sortedBy { it.timestamp }
+        val conversationSamples = dao.byCollectorKeySince(
+            "voice_transcription",
+            "conversation_present",
+            lookbackStart
+        ).sortedBy { it.timestamp }
+        val speechDensitySamples = dao.byCollectorKeySince(
+            "voice_transcription",
+            "speech_density_wpm",
+            lookbackStart
+        ).sortedBy { it.timestamp }
+
+        val intervals = mutableListOf<SleepInterval>()
+        var lastOffTime: Long? = null
+        for (e in events) {
+            when (e.value) {
+                "screen_off" -> lastOffTime = e.timestamp
+                "screen_on" -> {
+                    val off = lastOffTime
+                    if (off != null) {
+                        val clippedStart = maxOf(off, windowStart)
+                        val clippedEnd = minOf(e.timestamp, now)
+                        val clippedDuration = clippedEnd - clippedStart
+                        if (clippedDuration > 2 * 3_600_000L) {
+                            val evidence = scoreSleepEvidence(
+                                startMs = clippedStart,
+                                endMs = clippedEnd,
+                                durationMs = clippedDuration,
+                                lightSamples = lightSamples,
+                                soundSamples = soundSamples,
+                                conversationSamples = conversationSamples,
+                                speechDensitySamples = speechDensitySamples
+                            )
+                            if (evidence.confidence >= 0.4) {
+                                intervals.add(
+                                    SleepInterval(
+                                        startMs = clippedStart,
+                                        endMs = clippedEnd,
+                                        durationMs = clippedDuration,
+                                        confidence = evidence.confidence,
+                                        evidence = evidence.evidence,
+                                        averageLux = evidence.averageLux,
+                                        averageSoundDbfs = evidence.averageSoundDbfs
+                                    )
+                                )
+                            }
+                        }
+                    }
+                    lastOffTime = null
+                }
+            }
+        }
+
+        return intervals.sortedBy { it.startMs }
+    }
+
+    private fun scoreSleepEvidence(
+        startMs: Long,
+        endMs: Long,
+        durationMs: Long,
+        lightSamples: List<DataPointEntity>,
+        soundSamples: List<DataPointEntity>,
+        conversationSamples: List<DataPointEntity>,
+        speechDensitySamples: List<DataPointEntity>
+    ): SleepEvidenceScore {
+        val evidence = mutableListOf("phone inactive")
+        var confidence = 0.45
+
+        val luxValues = lightSamples
+            .filter { it.timestamp in startMs..endMs }
+            .mapNotNull { it.value.toDoubleOrNull() }
+        val averageLux = luxValues.average().takeIf { luxValues.isNotEmpty() && !it.isNaN() }
+        if (luxValues.isNotEmpty()) {
+            val darkRatio = luxValues.count { it <= SLEEP_DARK_LUX } / luxValues.size.toDouble()
+            when {
+                darkRatio >= 0.6 -> {
+                    confidence += 0.25
+                    evidence += "dark room (${averageLux?.let { "%.0f".format(it) } ?: "?"} lux)"
+                }
+                averageLux != null && averageLux >= 50.0 -> {
+                    confidence -= 0.15
+                    evidence += "light present (${"%.0f".format(averageLux)} lux)"
+                }
+                else -> evidence += "dim light"
+            }
+        } else {
+            evidence += "no light data"
+        }
+
+        val soundValues = soundSamples
+            .filter { it.timestamp in startMs..endMs }
+            .mapNotNull { it.value.toDoubleOrNull() }
+        val averageSoundDbfs = soundValues.average().takeIf { soundValues.isNotEmpty() && !it.isNaN() }
+        if (soundValues.isNotEmpty()) {
+            val quietRatio = soundValues.count { it <= SLEEP_QUIET_DBFS } / soundValues.size.toDouble()
+            when {
+                quietRatio >= 0.6 -> {
+                    confidence += 0.20
+                    evidence += "quiet room (${averageSoundDbfs?.let { "%.0f".format(it) } ?: "?"} dBFS)"
+                }
+                averageSoundDbfs != null && averageSoundDbfs >= -35.0 -> {
+                    confidence -= 0.15
+                    evidence += "sound present (${"%.0f".format(averageSoundDbfs)} dBFS)"
+                }
+                else -> evidence += "moderate sound"
+            }
+        } else {
+            val conversationValues = conversationSamples
+                .filter { it.timestamp in startMs..endMs }
+                .map { it.value.toBooleanStrictOrNull() ?: false }
+            val densityValues = speechDensitySamples
+                .filter { it.timestamp in startMs..endMs }
+                .mapNotNull { it.value.toDoubleOrNull() }
+            val quietVoiceWindows = conversationValues.count { !it } + densityValues.count { it < 5.0 }
+            val totalVoiceWindows = conversationValues.size + densityValues.size
+            if (totalVoiceWindows > 0 && quietVoiceWindows / totalVoiceWindows.toDouble() >= 0.6) {
+                confidence += 0.12
+                evidence += "little speech"
+            } else if (totalVoiceWindows == 0) {
+                evidence += "no sound data"
+            }
+        }
+
+        when {
+            durationMs >= 6 * 3_600_000L -> confidence += 0.10
+            durationMs >= 4 * 3_600_000L -> confidence += 0.05
+        }
+
+        return SleepEvidenceScore(
+            confidence = confidence.coerceIn(0.1, 0.95),
+            evidence = evidence,
+            averageLux = averageLux,
+            averageSoundDbfs = averageSoundDbfs
+        )
+    }
+
+    private data class SleepEvidenceScore(
+        val confidence: Double,
+        val evidence: List<String>,
+        val averageLux: Double?,
+        val averageSoundDbfs: Double?
+    )
+
+    private companion object {
+        const val SLEEP_DARK_LUX = 10.0
+        const val SLEEP_QUIET_DBFS = -45.0
     }
 
     // ── Card 3: App attention ────────────────────────────────────────
@@ -1493,29 +1714,31 @@ class InsightsViewModel @Inject constructor(
             fun latestValue(key: String): String? =
                 sysStats.filter { it.key == key }.maxByOrNull { it.timestamp }?.value
 
-            val ramPct = latestValue("ram_used_pct")?.toDoubleOrNull() ?: return null
-            val procCount = latestValue("running_process_count")?.toIntOrNull() ?: 0
-            val fgCount = latestValue("foreground_processes")?.toIntOrNull() ?: 0
-            val bgCount = latestValue("background_processes")?.toIntOrNull() ?: 0
-            val thermal = latestValue("thermal_status") ?: "unknown"
-            val uptimeMs = latestValue("uptime_ms")?.toLongOrNull() ?: 0L
+            val ramPct = latestValue("ram_used_pct")?.toDoubleOrNull()
+            if (ramPct != null) {
+                val procCount = latestValue("running_process_count")?.toIntOrNull() ?: 0
+                val fgCount = latestValue("foreground_processes")?.toIntOrNull() ?: 0
+                val bgCount = latestValue("background_processes")?.toIntOrNull() ?: 0
+                val thermal = latestValue("thermal_status") ?: "unknown"
+                val uptimeMs = latestValue("uptime_ms")?.toLongOrNull() ?: 0L
 
-            val ramReadings = sysStats.filter { it.key == "ram_used_pct" }
-                .mapNotNull { dp -> dp.value.toDoubleOrNull()?.let { dp.timestamp to it } }
-                .sortedBy { it.first }
-            val memTrend = if (ramReadings.size >= 2) {
-                ramReadings.last().second - ramReadings.first().second
-            } else 0.0
+                val ramReadings = sysStats.filter { it.key == "ram_used_pct" }
+                    .mapNotNull { dp -> dp.value.toDoubleOrNull()?.let { dp.timestamp to it } }
+                    .sortedBy { it.first }
+                val memTrend = if (ramReadings.size >= 2) {
+                    ramReadings.last().second - ramReadings.first().second
+                } else 0.0
 
-            return DeviceHealth(
-                ramUsedPct = ramPct,
-                processCount = procCount,
-                foregroundCount = fgCount,
-                backgroundCount = bgCount,
-                thermalStatus = thermal,
-                uptimeHours = uptimeMs / 3_600_000.0,
-                memoryTrend = memTrend
-            )
+                return DeviceHealth(
+                    ramUsedPct = ramPct,
+                    processCount = procCount,
+                    foregroundCount = fgCount,
+                    backgroundCount = bgCount,
+                    thermalStatus = thermal,
+                    uptimeHours = uptimeMs / 3_600_000.0,
+                    memoryTrend = memTrend
+                )
+            }
         }
 
         // Fallback: partial health from battery + hardware data
@@ -1525,13 +1748,13 @@ class InsightsViewModel @Inject constructor(
         fun latestBattery(key: String): String? =
             batteryData.filter { it.key == key }.maxByOrNull { it.timestamp }?.value
 
-        val level = latestBattery("level")?.toDoubleOrNull() ?: return null
-        val temp = latestBattery("temperature")?.toDoubleOrNull()
+        latestBattery("level")?.toDoubleOrNull() ?: return null
+        val tempC = latestBattery("temperature_tenths_c")?.toDoubleOrNull()?.div(10.0)
         val thermal = when {
-            temp == null -> "unknown"
-            temp > 45 -> "severe"
-            temp > 40 -> "moderate"
-            temp > 35 -> "light"
+            tempC == null -> "unknown"
+            tempC > 45 -> "severe"
+            tempC > 40 -> "moderate"
+            tempC > 35 -> "light"
             else -> "none"
         }
 
@@ -1724,6 +1947,14 @@ class InsightsViewModel @Inject constructor(
                 events = logcatLaunches
             }
         }
+        // Fallback 3: voice transcription windows indicate awake/conversational activity
+        if (events.size < 30) {
+            val voiceWindows = dao.byCollectorKeySince("voice_transcription", "conversation_present", thirtyDaysAgo)
+                .filter { it.value.equals("true", ignoreCase = true) }
+            if (voiceWindows.size >= 15) {
+                events = voiceWindows
+            }
+        }
 
         if (events.size < 30) return null
 
@@ -1788,6 +2019,14 @@ class InsightsViewModel @Inject constructor(
                 .filter { it.key.startsWith("focus:") }
             if (logcatFocus.size >= 50) {
                 events = logcatFocus
+            }
+        }
+        // Fallback 3: voice context samples are sparse but useful for routine timing
+        if (events.size < 50) {
+            val voiceWindows = dao.byCollectorKeySince("voice_transcription", "conversation_present", fourteenDaysAgo)
+                .filter { it.value.equals("true", ignoreCase = true) }
+            if (voiceWindows.size >= 20) {
+                events = voiceWindows
             }
         }
 
@@ -2614,6 +2853,61 @@ class InsightsViewModel @Inject constructor(
             consistencyScore = consistency
         )
     }
+
+    private suspend fun computeVoiceContext(): VoiceContextInsight? {
+        val sevenDaysAgo = System.currentTimeMillis() - 7 * 86_400_000L
+        val points = dao.byCollectorSince("voice_transcription", sevenDaysAgo, limit = 20_000)
+        val windows = points.filter { it.key == "window_duration_ms" }
+        if (windows.isEmpty()) return null
+
+        val conversationCount = points
+            .filter { it.key == "conversation_present" && it.value.equals("true", ignoreCase = true) }
+            .size
+
+        val densityValues = points
+            .filter { it.key == "speech_density_wpm" }
+            .mapNotNull { it.value.toDoubleOrNull() }
+        val avgDensity = if (densityValues.isNotEmpty()) densityValues.average() else 0.0
+
+        val contexts = points
+            .filter { it.key == "inferred_context" }
+            .groupingBy { it.value }
+            .eachCount()
+            .toList()
+            .sortedByDescending { it.second }
+            .take(5)
+
+        val tags = points
+            .filter { it.key == "context_tags" }
+            .flatMap { parseTags(it.value) }
+            .groupingBy { it }
+            .eachCount()
+            .toList()
+            .sortedByDescending { it.second }
+            .take(8)
+
+        val latestTranscript = points
+            .filter { it.key == "transcript_text" && it.value.isNotBlank() }
+            .maxByOrNull { it.timestamp }
+            ?.value
+            ?.take(160)
+
+        return VoiceContextInsight(
+            samples7d = windows.size,
+            conversationSamples = conversationCount,
+            avgSpeechDensityWpm = avgDensity,
+            topContexts = contexts,
+            topTags = tags,
+            latestTranscript = latestTranscript
+        )
+    }
+
+    private fun parseTags(value: String): List<String> =
+        try {
+            Json.parseToJsonElement(value).jsonArray.map { it.jsonPrimitive.content }
+        } catch (_: Exception) {
+            emptyList()
+        }
 
     // ── Utilities ────────────────────────────────────────────────────
 

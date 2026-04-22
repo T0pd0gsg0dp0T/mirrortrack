@@ -2,6 +2,7 @@ package com.potpal.mirrortrack.export
 
 import android.content.Context
 import android.net.Uri
+import androidx.core.content.pm.PackageInfoCompat
 import com.potpal.mirrortrack.collectors.Ingestor
 import com.potpal.mirrortrack.data.CryptoManager
 import com.potpal.mirrortrack.data.DatabaseHolder
@@ -67,7 +68,9 @@ class ExportManager @Inject constructor(
 
     private fun buildManifest(): String {
         val versionCode = try {
-            context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode
+            PackageInfoCompat.getLongVersionCode(
+                context.packageManager.getPackageInfo(context.packageName, 0)
+            )
         } catch (_: Exception) { 1L }
 
         return """{"kdf":"argon2id","t":3,"m":65536,"p":2,"app_version_code":$versionCode,"export_ts_ms":${System.currentTimeMillis()}}"""

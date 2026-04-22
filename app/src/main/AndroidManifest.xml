@@ -11,6 +11,7 @@
     <!-- Foreground service for continuous sensor/behavioral collection -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
@@ -22,6 +23,7 @@
 
     <!-- Location: LocationCollector. FINE implies COARSE; background not
          needed because collection runs inside a foreground service. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
     <!-- Activity recognition: ActivityRecognitionCollector -->
@@ -46,11 +48,10 @@
     <!-- READ_MEDIA_VIDEO removed: MediaExifCollector only reads images.
          READ_PHONE_STATE removed: no collector uses it. -->
 
-    <!-- Camera/mic: currently not wired to any collector. Uncomment when
-         adding the opt-in snapshot collector.
-    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- VoiceTranscriptionCollector: opt-in, on-device periodic speech windows.
+         No raw audio is stored; recognized text and derived context tags are
+         stored locally in SQLCipher. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    -->
 
     <!-- Special access: requires user to toggle in Settings manually -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
@@ -95,6 +96,11 @@
         android:theme="@style/Theme.MirrorTrack"
         tools:targetApi="31">
 
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            tools:node="remove" />
+
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
@@ -109,7 +115,7 @@
         <service
             android:name=".scheduling.CollectionForegroundService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse|microphone">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Local personal-data mirror collection; no network transmission." />

@@ -2,7 +2,7 @@
 
 **See your own data the way trackers do.**
 
-MirrorTrack is a personal Android app that collects the same device, behavioral, and sensor data that third-party tracker SDKs silently harvest from your phone — but instead of shipping it to ad networks, it stores everything in a local SQLCipher-encrypted database that only you can unlock. Nothing leaves your device. Ever.
+MirrorTrack turns your Android phone into a private intelligence lab for your own life. It captures the same signals that advertisers, brokers, and tracker SDKs use to profile you, including device identity, app attention, location patterns, ambient sensors, sleep clues, notifications, network behavior, and local voice context, then translates them into clear insight cards you can actually understand. The difference is ownership: every data point stays on your device in a SQLCipher-encrypted vault that only you can unlock. No cloud account, no broker pipeline, no hidden upload. Just the profile others try to build about you, made visible and kept under your control.
 
 ## The Problem
 
@@ -12,30 +12,30 @@ Existing privacy tools like Exodus Privacy and TrackerControl show you *what lea
 
 ## What It Does
 
-MirrorTrack runs 28 data collectors across 7 categories, feeding a unified encrypted database that powers 25 insight cards with real behavioral inference:
+MirrorTrack runs 31 data collectors across 7 categories, feeding a unified encrypted database that powers 26 insight cards with real behavioral inference:
 
-### Data Collection (28 Collectors)
+### Data Collection (31 Collectors)
 
 | Category | Collectors | Examples |
 |----------|-----------|----------|
 | **Device** | 5 | Build info, hardware specs, unique identifiers, integrity checks, system stats |
-| **Behavioral** | 5 | Screen on/off, battery state, app lifecycle, boot events, logcat streams |
+| **Behavioral** | 4 | Screen on/off, battery state, app lifecycle, logcat streams |
 | **Location** | 2 | GPS/network fixes, activity recognition (walking/driving/still) |
 | **Network** | 6 | WiFi SSIDs, Bluetooth devices, carrier info, public IP, connectivity state, per-app data usage |
 | **Apps** | 5 | Installed packages, usage stats, notification listener, AppOps audit, privacy dashboard |
-| **Sensors** | 4 | Accelerometer/gyroscope, environment (light/pressure/temp), step counter, body sensors |
-| **Personal** | 3 | Calendar events, contacts metadata, photo EXIF data |
+| **Sensors** | 5 | Accelerometer/gyroscope, environment (light/pressure/temp), ambient sound level, step counter, body sensors |
+| **Personal** | 4 | Calendar events, contacts metadata, photo EXIF data, on-device voice context |
 
 Every collector is **opt-in** — disabled by default, toggled individually in Settings. Each permission is gated behind an in-app explanation before any runtime request.
 
-### Insight Engine (25 Cards)
+### Insight Engine (26 Cards)
 
 The Insights screen processes raw data points into behavioral intelligence — the same kind of profiles that ad tech builds about you:
 
 | Card | What It Reveals |
 |------|----------------|
 | **Today** | Daily dashboard: data points, unlocks, screen time, steps, battery delta |
-| **Sleep Heatmap** | 13-week sleep duration grid with bedtime/wake detection from screen-off gaps |
+| **Sleep Timeline** | Last-72-hour sleep inference from phone inactivity, ambient light, ambient sound, and speech quietness |
 | **App Attention** | Top apps by foreground time with week-over-week delta |
 | **Anomaly Feed** | Statistical outliers in your behavior (unusual unlock counts, screen time spikes) |
 | **Location Clusters** | GPS fix clustering with interactive dot map and user-renamable places |
@@ -60,6 +60,7 @@ The Insights screen processes raw data points into behavioral intelligence — t
 | **Weekday vs Weekend** | Side-by-side behavioral comparison with divergence scoring |
 | **Income Inference** | Socioeconomic tier from device model + carrier + app signals |
 | **Commute Pattern** | Departure/return times, transport mode, consistency scoring |
+| **Voice Context** | Local speech-window summaries for conversation density and context tags without storing raw audio |
 
 ### Security
 

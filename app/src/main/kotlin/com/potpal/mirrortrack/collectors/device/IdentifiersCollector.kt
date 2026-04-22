@@ -59,18 +59,7 @@ class IdentifiersCollector @Inject constructor(
             val installUuid = getOrCreateInstallUuid(context)
             points.add(DataPoint.string(id, category, "install_uuid", installUuid))
 
-            val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.packageManager.getPackageInfo(
-                    context.packageName,
-                    PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong())
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                context.packageManager.getPackageInfo(
-                    context.packageName,
-                    PackageManager.GET_SIGNING_CERTIFICATES
-                )
-            }
+            val packageInfo = packageInfoForSigning(context)
 
             points.add(
                 DataPoint.long(id, category, "first_install_time", packageInfo.firstInstallTime)
@@ -79,21 +68,10 @@ class IdentifiersCollector @Inject constructor(
                 DataPoint.long(id, category, "last_update_time", packageInfo.lastUpdateTime)
             )
 
-            val signingInfo = packageInfo.signingInfo
-            val sigSha256 = if (signingInfo != null) {
-                val certs = if (signingInfo.hasMultipleSigners()) {
-                    signingInfo.apkContentsSigners
-                } else {
-                    signingInfo.signingCertificateHistory
-                }
-                certs?.firstOrNull()?.let { cert ->
-                    val digest = MessageDigest.getInstance("SHA-256")
-                    digest.digest(cert.toByteArray())
-                        .joinToString(":") { "%02X".format(it) }
-                } ?: "unavailable"
-            } else {
-                "unavailable"
-            }
+            val sigSha256 = firstSigningCertificateBytes(packageInfo)?.let { certBytes ->
+                val digest = MessageDigest.getInstance("SHA-256")
+                digest.digest(certBytes).joinToString(":") { "%02X".format(it) }
+            } ?: "unavailable"
             points.add(DataPoint.string(id, category, "package_signing_sha256", sigSha256))
         } catch (e: Exception) {
             Logger.e("IdentifiersCollector", "Error collecting identifiers", e)
@@ -101,6 +79,40 @@ class IdentifiersCollector @Inject constructor(
 
         return points
     }
+
+    private fun packageInfoForSigning(context: Context) =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.packageManager.getPackageInfo(
+                context.packageName,
+                PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong())
+            )
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            @Suppress("DEPRECATION")
+            context.packageManager.getPackageInfo(
+                context.packageName,
+                PackageManager.GET_SIGNING_CERTIFICATES
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            context.packageManager.getPackageInfo(
+                context.packageName,
+                PackageManager.GET_SIGNATURES
+            )
+        }
+
+    private fun firstSigningCertificateBytes(packageInfo: android.content.pm.PackageInfo): ByteArray? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val signingInfo = packageInfo.signingInfo ?: return null
+            val certs = if (signingInfo.hasMultipleSigners()) {
+                signingInfo.apkContentsSigners
+            } else {
+                signingInfo.signingCertificateHistory
+            }
+            certs?.firstOrNull()?.toByteArray()
+        } else {
+            @Suppress("DEPRECATION")
+            packageInfo.signatures?.firstOrNull()?.toByteArray()
+        }
 
     private suspend fun getOrCreateInstallUuid(context: Context): String {
         return context.identifiersDataStore.data
