@@ -212,12 +212,13 @@ fun InsightsScreen(
                     }
                 }
 
-                // Card 1: Today
+                // High-level behavioral summary
+                state.engagement?.let { eng ->
+                    item(key = "engagement") { EngagementCard(eng, meta["engagement"], diag) }
+                }
                 state.today?.let { today ->
                     item(key = "today") { TodayCard(today, meta["today"], diag) }
                 }
-
-                // Card 2: Sleep timeline
                 if (state.sleepDays.isNotEmpty() || state.sleepIntervals72h.isNotEmpty()) {
                     item(key = "sleep") {
                         SleepTimelineCard(
@@ -228,13 +229,6 @@ fun InsightsScreen(
                         )
                     }
                 }
-
-                // Card 3: App attention
-                if (state.appAttention.isNotEmpty()) {
-                    item(key = "apps") { AppAttentionCard(state.appAttention, meta["apps"], diag) }
-                }
-
-                // Card 4: Anomaly feed
                 if (state.anomalies.isNotEmpty()) {
                     item(key = "anomaly_header") {
                         SectionLabel("ANOMALY FEED", Icons.Default.Warning, TerminalAmber)
@@ -244,7 +238,15 @@ fun InsightsScreen(
                     }
                 }
 
-                // Card 5: Location map
+                // Routine, schedule, and places
+                state.homeWork?.let { hw ->
+                    item(key = "homework") { HomeWorkCard(hw, meta["homework"], diag) }
+                }
+                state.commute?.let { com ->
+                    if (com.detected) {
+                        item(key = "commute") { CommuteCard(com, meta["commute"], diag) }
+                    }
+                }
                 if (state.locationClusters.isNotEmpty()) {
                     item(key = "location") {
                         LocationMapCard(
@@ -255,121 +257,169 @@ fun InsightsScreen(
                         )
                     }
                 }
-
-                // Card 6: Unlock-after-notification
-                if (state.unlockLatencies.isNotEmpty()) {
-                    item(key = "unlock") { UnlockLatencyCard(state.unlockLatencies, meta["unlock"], diag) }
+                if (state.dwellTimes.isNotEmpty()) {
+                    item(key = "dwell") { DwellTimeCard(state.dwellTimes, meta["dwell"], diag) }
                 }
-
-                // Card 7: Fingerprint stability
-                if (state.fingerprint.isNotEmpty()) {
-                    item(key = "fingerprint") { FingerprintStabilityCard(state.fingerprint, meta["fingerprint"], diag) }
+                state.circadian?.let { circ ->
+                    item(key = "circadian") { CircadianCard(circ, meta["circadian"], diag) }
                 }
-
-                // Card 8: Monthly Trends
+                state.routine?.let { rout ->
+                    item(key = "routine") { RoutineCard(rout, meta["routine"], diag) }
+                }
+                state.weekdayWeekend?.let { wdwe ->
+                    item(key = "weekdayweekend") { WeekdayWeekendCard(wdwe, meta["weekdayweekend"], diag) }
+                }
                 if (state.monthlyTrends.size >= 2) {
                     item(key = "trends") { MonthlyTrendsCard(state.monthlyTrends, meta["trends"], diag) }
                 }
 
-                // Card 9: Engagement Score
-                state.engagement?.let { eng ->
-                    item(key = "engagement") { EngagementCard(eng, meta["engagement"], diag) }
-                }
-
-                // Card 10: Privacy Radar
-                if (state.privacyRadar.isNotEmpty()) {
-                    item(key = "privacy") { PrivacyRadarCard(state.privacyRadar, meta["privacy"], diag) }
-                }
-
-                // Card 11: Data Flow Monitor
-                if (state.dataFlow.isNotEmpty()) {
-                    item(key = "dataflow") { DataFlowCard(state.dataFlow, meta["dataflow"], diag) }
-                }
-
-                // Card 12: App Compulsion Index
-                if (state.appCompulsion.isNotEmpty()) {
-                    item(key = "compulsion") { AppCompulsionCard(state.appCompulsion, meta["compulsion"], diag) }
-                }
-
-                // Card 13: Device Health
-                state.deviceHealth?.let { health ->
-                    item(key = "health") { DeviceHealthCard(health, meta["health"], diag) }
-                }
-
-                // Card 14: Identity Entropy
-                state.identityEntropy?.let { entropy ->
-                    item(key = "entropy") { IdentityEntropyCard(entropy, meta["entropy"], diag) }
-                }
-
-                // Card 15: Home / Work
-                state.homeWork?.let { hw ->
-                    item(key = "homework") { HomeWorkCard(hw, meta["homework"], diag) }
-                }
-
-                // Card 16: Circadian Profile
-                state.circadian?.let { circ ->
-                    item(key = "circadian") { CircadianCard(circ, meta["circadian"], diag) }
-                }
-
-                // Card 17: Routine Predictability
-                state.routine?.let { rout ->
-                    item(key = "routine") { RoutineCard(rout, meta["routine"], diag) }
-                }
-
-                // Card 18: Social Pressure
+                // Attention, social pressure, and privacy behavior
                 if (state.socialPressure.isNotEmpty()) {
                     item(key = "social") { SocialPressureCard(state.socialPressure, meta["social"], diag) }
                 }
-
-                // Card 19: App Portfolio
-                state.appPortfolio?.let { port ->
-                    item(key = "portfolio") { AppPortfolioCard(port, meta["portfolio"], diag) }
+                if (state.unlockLatencies.isNotEmpty()) {
+                    item(key = "unlock") { UnlockLatencyCard(state.unlockLatencies, meta["unlock"], diag) }
                 }
-
-                // Card 20: Charging Behavior
-                state.charging?.let { chg ->
-                    item(key = "charging") { ChargingCard(chg, meta["charging"], diag) }
+                if (state.privacyRadar.isNotEmpty()) {
+                    item(key = "privacy") { PrivacyRadarCard(state.privacyRadar, meta["privacy"], diag) }
                 }
-
-                // Card 21: WiFi Footprint
-                state.wifiFootprint?.let { wifi ->
-                    item(key = "wifi") { WiFiCard(wifi, meta["wifi"], diag) }
+                if (state.appCompulsion.isNotEmpty()) {
+                    item(key = "compulsion") { AppCompulsionCard(state.appCompulsion, meta["compulsion"], diag) }
                 }
-
-                // Card 22: Session Fragmentation
                 state.sessionFrag?.let { frag ->
                     item(key = "fragmentation") { FragmentationCard(frag, meta["fragmentation"], diag) }
                 }
 
-                // Card 23: Dwell Times
-                if (state.dwellTimes.isNotEmpty()) {
-                    item(key = "dwell") { DwellTimeCard(state.dwellTimes, meta["dwell"], diag) }
+                // Context, device state, and inferred profile
+                state.voiceContext?.let { voice ->
+                    item(key = "voice") { VoiceContextCard(voice, meta["voice"], diag) }
                 }
-
-                // Card 24: Weekday vs Weekend
-                state.weekdayWeekend?.let { wdwe ->
-                    item(key = "weekdayweekend") { WeekdayWeekendCard(wdwe, meta["weekdayweekend"], diag) }
+                state.deviceHealth?.let { health ->
+                    item(key = "health") { DeviceHealthCard(health, meta["health"], diag) }
                 }
-
-                // Card 25: Income Inference
+                state.charging?.let { chg ->
+                    item(key = "charging") { ChargingCard(chg, meta["charging"], diag) }
+                }
                 state.income?.let { inc ->
                     item(key = "income") { IncomeCard(inc, meta["income"], diag) }
                 }
-
-                // Card 26: Commute Pattern
-                state.commute?.let { com ->
-                    if (com.detected) {
-                        item(key = "commute") { CommuteCard(com, meta["commute"], diag) }
-                    }
+                state.wifiFootprint?.let { wifi ->
+                    item(key = "wifi") { WiFiCard(wifi, meta["wifi"], diag) }
+                }
+                state.appPortfolio?.let { port ->
+                    item(key = "portfolio") { AppPortfolioCard(port, meta["portfolio"], diag) }
                 }
 
-                // Card 27: Voice Context
-                state.voiceContext?.let { voice ->
-                    item(key = "voice") { VoiceContextCard(voice, meta["voice"], diag) }
+                // Dense technical detail
+                if (state.appAttention.isNotEmpty()) {
+                    item(key = "apps") { AppAttentionCard(state.appAttention, meta["apps"], diag) }
+                }
+                if (state.dataFlow.isNotEmpty()) {
+                    item(key = "dataflow") { DataFlowCard(state.dataFlow, meta["dataflow"], diag) }
+                }
+                if (state.fingerprint.isNotEmpty()) {
+                    item(key = "fingerprint") { FingerprintStabilityCard(state.fingerprint, meta["fingerprint"], diag) }
+                }
+                state.identityEntropy?.let { entropy ->
+                    item(key = "entropy") { IdentityEntropyCard(entropy, meta["entropy"], diag) }
+                }
+
+                val unavailableInsights = unavailableInsightsFor(state)
+                if (unavailableInsights.isNotEmpty()) {
+                    item(key = "unavailable_header") {
+                        SectionLabel("UNAVAILABLE INSIGHTS", Icons.Default.Info, DimGray)
+                    }
+                    items(unavailableInsights, key = { "unavailable_${it.title}" }) { insight ->
+                        UnavailableInsightCard(insight)
+                    }
                 }
 
                 item { Spacer(Modifier.height(16.dp)) }
             }
+        }
+    }
+}
+
+private data class UnavailableInsight(
+    val title: String,
+    val icon: ImageVector,
+    val reason: String
+)
+
+private fun unavailableInsightsFor(state: InsightsState): List<UnavailableInsight> = buildList {
+    if (state.engagement == null) add(UnavailableInsight("Engagement Score", Icons.Default.Speed, "Needs enough screen/app lifecycle sessions."))
+    if (state.today == null) add(UnavailableInsight("Today", Icons.Default.Timeline, "Needs today's collector activity."))
+    if (state.sleepDays.isEmpty() && state.sleepIntervals72h.isEmpty()) add(UnavailableInsight("Sleep Timeline", Icons.Default.Bed, "Needs screen inactivity plus optional light/sound signals."))
+    if (state.anomalies.isEmpty()) add(UnavailableInsight("Anomaly Feed", Icons.Default.Warning, "No unusual behavior detected yet."))
+    if (state.homeWork == null) add(UnavailableInsight("Home & Work", Icons.Default.Home, "Needs repeated location clusters across time of day."))
+    if (state.commute?.detected != true) add(UnavailableInsight("Commute Pattern", Icons.Default.DirectionsCar, "Needs repeated departure and return patterns."))
+    if (state.locationClusters.isEmpty()) add(UnavailableInsight("Location Clusters", Icons.Default.LocationOn, "Needs location fixes from the Location collector."))
+    if (state.dwellTimes.isEmpty()) add(UnavailableInsight("Dwell Times", Icons.Default.Place, "Needs enough visits to estimate stop duration."))
+    if (state.circadian == null) add(UnavailableInsight("Circadian Rhythm", Icons.Default.WbSunny, "Needs enough activity events across the day."))
+    if (state.routine == null) add(UnavailableInsight("Routine Predictability", Icons.Default.Schedule, "Needs repeated activity timing over multiple days."))
+    if (state.weekdayWeekend == null) add(UnavailableInsight("Weekday vs Weekend", Icons.Default.CalendarMonth, "Needs weekday and weekend samples."))
+    if (state.monthlyTrends.size < 2) add(UnavailableInsight("Monthly Trends", Icons.Default.Timeline, "Needs at least two months of data."))
+    if (state.socialPressure.isEmpty()) add(UnavailableInsight("Social Pressure", Icons.Default.Notifications, "Needs notification and unlock timing data."))
+    if (state.unlockLatencies.isEmpty()) add(UnavailableInsight("Unlock After Notification", Icons.Default.Notifications, "Needs notification-to-unlock samples."))
+    if (state.privacyRadar.isEmpty()) add(UnavailableInsight("Privacy Radar", Icons.Default.Shield, "Needs privacy access or AppOps audit data."))
+    if (state.appCompulsion.isEmpty()) add(UnavailableInsight("App Compulsion Index", Icons.Default.Repeat, "Needs app launch or usage samples."))
+    if (state.sessionFrag == null) add(UnavailableInsight("Session Fragmentation", Icons.Default.DataUsage, "Needs app switching/session activity."))
+    if (state.voiceContext == null) add(UnavailableInsight("Voice Context", Icons.Default.Mic, "Needs enabled voice transcription samples."))
+    if (state.deviceHealth == null) add(UnavailableInsight("Device Health", Icons.Default.Memory, "Needs system stats or battery fallback data."))
+    if (state.charging == null) add(UnavailableInsight("Charging Behavior", Icons.Default.BatteryChargingFull, "Needs battery charge/discharge events."))
+    if (state.income == null) add(UnavailableInsight("Income Inference", Icons.Default.AttachMoney, "Needs device, carrier, and app portfolio hints."))
+    if (state.wifiFootprint == null) add(UnavailableInsight("WiFi Footprint", Icons.Default.Wifi, "Needs Wi-Fi scan or connectivity samples."))
+    if (state.appPortfolio == null) add(UnavailableInsight("App Portfolio", Icons.Default.Apps, "Needs installed-app inventory data."))
+    if (state.appAttention.isEmpty()) add(UnavailableInsight("App Attention (7d)", Icons.Default.Smartphone, "Needs usage stats or app foreground data."))
+    if (state.dataFlow.isEmpty()) add(UnavailableInsight("Data Flow", Icons.Default.SwapVert, "Needs per-app network usage data."))
+    if (state.fingerprint.isEmpty()) add(UnavailableInsight("Fingerprint Stability", Icons.Default.Fingerprint, "Needs device identity snapshots."))
+    if (state.identityEntropy == null) add(UnavailableInsight("Identity Entropy", Icons.Default.Fingerprint, "Needs enough fingerprint fields to estimate uniqueness."))
+}
+
+@Composable
+private fun UnavailableInsightCard(insight: UnavailableInsight) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f))
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(DimGray.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(insight.icon, null, tint = DimGray, modifier = Modifier.size(18.dp))
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    insight.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+                Text(
+                    insight.reason,
+                    fontSize = 11.sp,
+                    color = DimGray
+                )
+            }
+            Text(
+                "WAITING",
+                fontSize = 9.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                color = DimGray,
+                modifier = Modifier
+                    .background(DimGray.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 5.dp, vertical = 2.dp)
+            )
         }
     }
 }
