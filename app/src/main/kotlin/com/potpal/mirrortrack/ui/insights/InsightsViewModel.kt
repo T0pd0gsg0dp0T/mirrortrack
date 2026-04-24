@@ -1,10 +1,15 @@
 package com.potpal.mirrortrack.ui.insights
 
+import android.app.AppOpsManager
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Process
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.core.app.NotificationManagerCompat
 import com.potpal.mirrortrack.collectors.Category
 import com.potpal.mirrortrack.collectors.CollectorRegistry
+import com.potpal.mirrortrack.collectors.AccessTier
 import com.potpal.mirrortrack.collectors.personal.VoiceModelInstaller
 import com.potpal.mirrortrack.data.DataPointDao
 import com.potpal.mirrortrack.data.entities.DataPointEntity
@@ -156,6 +161,8 @@ data class InsightsState(
     // Collection summary
     val categoryCounts: List<CategoryCount> = emptyList(),
     val totalDataPoints: Long = 0L,
+    val trackedPermissionCount: Int = 0,
+    val missingPermissionCount: Int = 0,
     // Per-card metadata
     val cardMeta: Map<String, InsightMeta> = emptyMap(),
     // Diagnostics toggle
@@ -167,6 +174,11 @@ data class CategoryCount(
     val displayName: String,
     val count: Long,
     val icon: String   // category enum name, resolved to icon in UI
+)
+
+data class PermissionSummary(
+    val trackedCount: Int,
+    val missingCount: Int
 )
 
 data class TodayData(
@@ -278,7 +290,8 @@ data class DeviceHealth(
     val backgroundCount: Int,
     val thermalStatus: String,
     val uptimeHours: Double,
-    val memoryTrend: Double        // delta in used% over last 24h
+    val memoryTrend: Double,       // delta in used% over last 24h
+    val processCountsTrusted: Boolean = false
 )
 
 data class IdentityEntropy(
@@ -374,7 +387,10 @@ data class WeekdayWeekendDelta(
     val weekendAvgScreenMs: Long,
     val weekdayTopApps: List<String>,
     val weekendTopApps: List<String>,
-    val balanceScore: Double            // 0.0 = identical, 1.0 = completely different
+    val balanceScore: Double,           // 0.0 = identical, 1.0 = completely different
+    val primaryLabel: String = "Weekday",
+    val secondaryLabel: String = "Weekend",
+    val basisDescription: String = "Behavioral differences between workdays and days off"
 )
 
 data class IncomeInference(
@@ -534,6 +550,7 @@ class InsightsViewModel @Inject constructor(
                 }
             }
             val totalDef = async { dao.count() }
+            val permissionSummaryDef = async { computePermissionSummary() }
 
             val todayDef = async { computeToday() }
             val sleepDef = async { computeSleep() }
@@ -592,6 +609,7 @@ class InsightsViewModel @Inject constructor(
             val income = incomeDef.await()
             val commute = commuteDef.await()
             val voiceContext = voiceDef.await()
+            val permissionSummary = permissionSummaryDef.await()
 
             // Auto-generate metadata for any card not already tracked by buildMeta
             autoMeta("engagement", engagement != null, listOf("screen_state"), listOf("app_lifecycle"))
@@ -618,6 +636,8 @@ class InsightsViewModel @Inject constructor(
                 loading = false,
                 categoryCounts = catCountsDef.await(),
                 totalDataPoints = totalDef.await(),
+                trackedPermissionCount = permissionSummary.trackedCount,
+                missingPermissionCount = permissionSummary.missingCount,
                 today = today,
                 sleepDays = sleepDays,
                 sleepIntervals72h = sleepIntervals72h,
@@ -763,16 +783,17 @@ class InsightsViewModel @Inject constructor(
     private suspend fun computeSleep(): List<SleepDay> {
         val ninetyDaysAgo = LocalDate.now().minusDays(90)
             .atStartOfDay(zone).toInstant().toEpochMilli()
+        val queryStart = ninetyDaysAgo - 12 * 3_600_000L
         val attempted = mutableListOf("screen_state")
         var source = "primary"
 
-        var events = dao.byCollectorKeySince("screen_state", "event", ninetyDaysAgo)
+        var events = dao.byCollectorKeySince("screen_state", "event", queryStart)
             .sortedBy { it.timestamp }
 
         // Fallback: synthesize screen-like events from app_lifecycle
         if (events.size < 10) {
             attempted.add("app_lifecycle")
-            val lifecycle = dao.byCollectorSince("app_lifecycle", ninetyDaysAgo)
+            val lifecycle = dao.byCollectorSince("app_lifecycle", queryStart)
                 .sortedBy { it.timestamp }
             if (lifecycle.size >= 10) {
                 source = "fallback:app_lifecycle"
@@ -791,28 +812,12 @@ class InsightsViewModel @Inject constructor(
             return emptyList()
         }
 
-        // Build screen-off gaps
-        data class Gap(val offTime: Long, val onTime: Long) {
-            val durationMs get() = onTime - offTime
-        }
-
-        val gaps = mutableListOf<Gap>()
-        var lastOffTime: Long? = null
-        for (e in events) {
-            when (e.value) {
-                "screen_off" -> lastOffTime = e.timestamp
-                "screen_on" -> {
-                    val off = lastOffTime
-                    if (off != null) {
-                        val dur = e.timestamp - off
-                        if (dur > 2 * 3_600_000) { // > 2 hours = potential sleep
-                            gaps.add(Gap(off, e.timestamp))
-                        }
-                    }
-                    lastOffTime = null
-                }
-            }
-        }
+        val inactivityIntervals = extractInactiveIntervals(
+            events = events,
+            windowStart = queryStart,
+            windowEnd = System.currentTimeMillis(),
+            minDurationMs = 2 * 3_600_000L
+        )
 
         // For each date, find the longest overnight gap that overlaps with it
         val today = LocalDate.now()
@@ -832,9 +837,9 @@ class InsightsViewModel @Inject constructor(
                 val durationMs: Long
             )
 
-            val nightGaps = gaps.mapNotNull { g ->
-                val clippedStart = maxOf(g.offTime, nightStart)
-                val clippedEnd = minOf(g.onTime, nightEnd)
+            val nightGaps = inactivityIntervals.mapNotNull { g ->
+                val clippedStart = maxOf(g.startMs, nightStart)
+                val clippedEnd = minOf(g.endMs, nightEnd)
                 val clippedDuration = clippedEnd - clippedStart
                 if (clippedDuration > 2 * 3_600_000) {
                     NightSleepGap(clippedStart, clippedEnd, clippedDuration)
@@ -909,48 +914,100 @@ class InsightsViewModel @Inject constructor(
             lookbackStart
         ).sortedBy { it.timestamp }
 
-        val intervals = mutableListOf<SleepInterval>()
-        var lastOffTime: Long? = null
-        for (e in events) {
-            when (e.value) {
-                "screen_off" -> lastOffTime = e.timestamp
-                "screen_on" -> {
-                    val off = lastOffTime
-                    if (off != null) {
-                        val clippedStart = maxOf(off, windowStart)
-                        val clippedEnd = minOf(e.timestamp, now)
-                        val clippedDuration = clippedEnd - clippedStart
-                        if (clippedDuration > 2 * 3_600_000L) {
-                            val evidence = scoreSleepEvidence(
-                                startMs = clippedStart,
-                                endMs = clippedEnd,
-                                durationMs = clippedDuration,
-                                lightSamples = lightSamples,
-                                soundSamples = soundSamples,
-                                conversationSamples = conversationSamples,
-                                speechDensitySamples = speechDensitySamples
-                            )
-                            if (evidence.confidence >= 0.4) {
-                                intervals.add(
-                                    SleepInterval(
-                                        startMs = clippedStart,
-                                        endMs = clippedEnd,
-                                        durationMs = clippedDuration,
-                                        confidence = evidence.confidence,
-                                        evidence = evidence.evidence,
-                                        averageLux = evidence.averageLux,
-                                        averageSoundDbfs = evidence.averageSoundDbfs
-                                    )
-                                )
-                            }
-                        }
+        return extractInactiveIntervals(
+            events = events,
+            windowStart = windowStart,
+            windowEnd = now,
+            minDurationMs = 2 * 3_600_000L
+        ).mapNotNull { interval ->
+            val evidence = scoreSleepEvidence(
+                startMs = interval.startMs,
+                endMs = interval.endMs,
+                durationMs = interval.durationMs,
+                lightSamples = lightSamples,
+                soundSamples = soundSamples,
+                conversationSamples = conversationSamples,
+                speechDensitySamples = speechDensitySamples
+            )
+            if (evidence.confidence >= 0.4) {
+                SleepInterval(
+                    startMs = interval.startMs,
+                    endMs = interval.endMs,
+                    durationMs = interval.durationMs,
+                    confidence = evidence.confidence,
+                    evidence = evidence.evidence,
+                    averageLux = evidence.averageLux,
+                    averageSoundDbfs = evidence.averageSoundDbfs
+                )
+            } else {
+                null
+            }
+        }.sortedBy { it.startMs }
+    }
+
+    private data class InactiveInterval(
+        val startMs: Long,
+        val endMs: Long
+    ) {
+        val durationMs: Long get() = endMs - startMs
+    }
+
+    private fun extractInactiveIntervals(
+        events: List<DataPointEntity>,
+        windowStart: Long,
+        windowEnd: Long,
+        minDurationMs: Long,
+        interruptionMergeMs: Long = 15 * 60_000L
+    ): List<InactiveInterval> {
+        if (events.isEmpty()) return emptyList()
+
+        val intervals = mutableListOf<InactiveInterval>()
+        var sleepStart: Long? = null
+        var pendingWakeTs: Long? = null
+
+        fun addInterval(startMs: Long, endMs: Long) {
+            val clippedStart = maxOf(startMs, windowStart)
+            val clippedEnd = minOf(endMs, windowEnd)
+            if (clippedEnd - clippedStart >= minDurationMs) {
+                intervals += InactiveInterval(clippedStart, clippedEnd)
+            }
+        }
+
+        for (event in events.sortedBy { it.timestamp }) {
+            val activeSleepStart = sleepStart
+            val tentativeWake = pendingWakeTs
+            if (activeSleepStart != null && tentativeWake != null) {
+                if (event.value == "screen_off" && event.timestamp - tentativeWake <= interruptionMergeMs) {
+                    pendingWakeTs = null
+                } else {
+                    addInterval(activeSleepStart, tentativeWake)
+                    sleepStart = null
+                    pendingWakeTs = null
+                }
+            }
+
+            when (event.value) {
+                "screen_off" -> if (sleepStart == null) sleepStart = event.timestamp
+                "screen_on" -> if (sleepStart != null && pendingWakeTs == null) {
+                    pendingWakeTs = event.timestamp
+                }
+                "user_present" -> {
+                    val start = sleepStart
+                    if (start != null) {
+                        addInterval(start, event.timestamp)
                     }
-                    lastOffTime = null
+                    sleepStart = null
+                    pendingWakeTs = null
                 }
             }
         }
 
-        return intervals.sortedBy { it.startMs }
+        val finalStart = sleepStart
+        if (finalStart != null) {
+            addInterval(finalStart, pendingWakeTs ?: windowEnd)
+        }
+
+        return intervals
     }
 
     private fun scoreSleepEvidence(
@@ -3071,6 +3128,45 @@ class InsightsViewModel @Inject constructor(
         } catch (_: Exception) {
             emptyList()
         }
+
+    private fun computePermissionSummary(): PermissionSummary {
+        val runtimePermissions = registry.all()
+            .filter { it.accessTier == AccessTier.RUNTIME && it.requiredPermissions.isNotEmpty() }
+            .flatMap { it.requiredPermissions }
+            .distinct()
+
+        val missingRuntimePermissions = runtimePermissions.count { permission ->
+            context.checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED
+        }
+
+        val specialAccessChecks = registry.all()
+            .filter { it.accessTier == AccessTier.SPECIAL_ACCESS }
+            .mapNotNull { collector ->
+                when (collector.id) {
+                    "notification_listener" -> {
+                        NotificationManagerCompat.getEnabledListenerPackages(context)
+                            .contains(context.packageName)
+                    }
+                    "usage_stats" -> {
+                        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager
+                        val mode = appOps?.checkOpNoThrow(
+                            AppOpsManager.OPSTR_GET_USAGE_STATS,
+                            Process.myUid(),
+                            context.packageName
+                        )
+                        mode == AppOpsManager.MODE_ALLOWED
+                    }
+                    else -> null
+                }
+            }
+
+        val missingSpecialAccess = specialAccessChecks.count { granted -> !granted }
+
+        return PermissionSummary(
+            trackedCount = runtimePermissions.size + specialAccessChecks.size,
+            missingCount = missingRuntimePermissions + missingSpecialAccess
+        )
+    }
 
     // ── Utilities ────────────────────────────────────────────────────
 

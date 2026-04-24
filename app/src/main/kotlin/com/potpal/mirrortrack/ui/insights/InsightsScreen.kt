@@ -83,12 +83,14 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -123,6 +125,15 @@ private val TerminalPurple = Color(0xFFD2A8FF)
 private val DimGray = Color(0xFF484F58)
 private val CellEmpty = Color(0xFF21262D)
 
+private data class CardExpansionCommand(
+    val collapsed: Boolean,
+    val version: Int
+)
+
+private val LocalCardExpansionCommand = staticCompositionLocalOf {
+    CardExpansionCommand(collapsed = true, version = 0)
+}
+
 // ── Root screen ──────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -134,6 +145,20 @@ fun InsightsScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var showHelp by rememberSaveable { mutableStateOf(false) }
+    var collapseAllCards by rememberSaveable { mutableStateOf(true) }
+    var expansionCommandVersion by rememberSaveable { mutableStateOf(0) }
+    val permissionIndicatorColor = when {
+        state.trackedPermissionCount == 0 -> DimGray
+        state.missingPermissionCount == 0 -> TerminalGreen
+        state.missingPermissionCount == 1 -> TerminalAmber
+        else -> TerminalRed
+    }
+    val permissionIndicatorDescription = when {
+        state.trackedPermissionCount == 0 -> "Permission status unavailable"
+        state.missingPermissionCount == 0 -> "All tracked permissions granted"
+        state.missingPermissionCount == 1 -> "One tracked permission missing"
+        else -> "${state.missingPermissionCount} tracked permissions missing"
+    }
 
     if (showHelp) {
         HelpScreen(
@@ -149,71 +174,94 @@ fun InsightsScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Psychology, null, tint = TerminalGreen, modifier = Modifier.size(24.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("MirrorTrack", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { viewModel.toggleDiagnostics() }) {
-                        Icon(
-                            Icons.Default.Speed,
-                            "Toggle diagnostics",
-                            tint = if (state.showDiagnostics) TerminalAmber else DimGray
-                        )
-                    }
-                    IconButton(onClick = { viewModel.refresh() }) {
-                        Icon(Icons.Default.Refresh, "Refresh", tint = TerminalGreen)
-                    }
-                    IconButton(onClick = { showHelp = true }) {
-                        Icon(
-                            Icons.Default.Info,
-                            "Methodology",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    IconButton(onClick = onNavigateToSettings) {
-                        Icon(Icons.Default.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
-                )
-            )
-        }
-    ) { padding ->
-        if (state.loading) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = TerminalGreen)
-                    Spacer(Modifier.height(16.dp))
-                    Text("Analyzing...", color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = FontFamily.Monospace)
-                }
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(horizontal = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                val meta = state.cardMeta
-                val diag = state.showDiagnostics
-
-                // ── COLLECTION SUMMARY ──────────────────────────────
-                item(key = "collection_header") {
-                    CollectionHeader(
-                        totalDataPoints = state.totalDataPoints,
-                        categories = state.categoryCounts,
-                        onCategoryClick = onNavigateToCategoryDetail
+    CompositionLocalProvider(
+        LocalCardExpansionCommand provides CardExpansionCommand(
+            collapsed = collapseAllCards,
+            version = expansionCommandVersion
+        )
+    ) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Psychology,
+                                permissionIndicatorDescription,
+                                tint = permissionIndicatorColor,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("MirrorTrack", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                        }
+                    },
+                    actions = {
+                        IconButton(
+                            onClick = {
+                                collapseAllCards = !collapseAllCards
+                                expansionCommandVersion += 1
+                            }
+                        ) {
+                            Icon(
+                                if (collapseAllCards) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                                if (collapseAllCards) "Expand all cards" else "Collapse all cards",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        IconButton(onClick = { viewModel.toggleDiagnostics() }) {
+                            Icon(
+                                Icons.Default.Speed,
+                                "Toggle diagnostics",
+                                tint = if (state.showDiagnostics) TerminalAmber else DimGray
+                            )
+                        }
+                        IconButton(onClick = { viewModel.refresh() }) {
+                            Icon(Icons.Default.Refresh, "Refresh", tint = TerminalGreen)
+                        }
+                        IconButton(onClick = { showHelp = true }) {
+                            Icon(
+                                Icons.Default.Info,
+                                "Methodology",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        IconButton(onClick = onNavigateToSettings) {
+                            Icon(Icons.Default.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.background
                     )
+                )
+            }
+        ) { padding ->
+            if (state.loading) {
+                Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = TerminalGreen)
+                        Spacer(Modifier.height(16.dp))
+                        Text("Analyzing...", color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = FontFamily.Monospace)
+                    }
                 }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .padding(horizontal = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    val meta = state.cardMeta
+                    val diag = state.showDiagnostics
+
+                    // ── COLLECTION SUMMARY ──────────────────────────────
+                    item(key = "collection_header") {
+                        CollectionHeader(
+                            totalDataPoints = state.totalDataPoints,
+                            categories = state.categoryCounts,
+                            onCategoryClick = onNavigateToCategoryDetail
+                        )
+                    }
 
                 // High-level behavioral summary
                 state.engagement?.let { eng ->
@@ -338,7 +386,8 @@ fun InsightsScreen(
                     }
                 }
 
-                item { Spacer(Modifier.height(16.dp)) }
+                    item { Spacer(Modifier.height(16.dp)) }
+                }
             }
         }
     }
@@ -382,7 +431,11 @@ private fun unavailableInsightsFor(state: InsightsState): List<UnavailableInsigh
 
 @Composable
 private fun UnavailableInsightCard(insight: UnavailableInsight) {
+    val expansionCommand = LocalCardExpansionCommand.current
     var collapsed by rememberSaveable("${insight.title}:unavailable:collapsed") { mutableStateOf(true) }
+    LaunchedEffect(expansionCommand.version) {
+        collapsed = expansionCommand.collapsed
+    }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -867,8 +920,12 @@ private fun AppAttentionCard(apps: List<AppAttention>, meta: InsightMeta? = null
 
 @Composable
 private fun AnomalyCard(anomaly: Anomaly, onDismiss: () -> Unit) {
+    val expansionCommand = LocalCardExpansionCommand.current
     var infoExpanded by rememberSaveable(anomaly.id) { mutableStateOf(false) }
     var collapsed by rememberSaveable("${anomaly.id}:collapsed") { mutableStateOf(true) }
+    LaunchedEffect(expansionCommand.version) {
+        collapsed = expansionCommand.collapsed
+    }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -921,6 +978,7 @@ private fun AnomalyCard(anomaly: Anomaly, onDismiss: () -> Unit) {
                     if (infoExpanded) {
                         EducationalInfoPanel(
                             text = educationalInfoForTitle("Anomaly Feed"),
+                            whyMatters = whyMattersForTitle("Anomaly Feed"),
                             accent = TerminalAmber,
                             modifier = Modifier.padding(top = 8.dp)
                         )
@@ -2852,9 +2910,14 @@ private fun InsightCardShell(
     showDiagnostics: Boolean = false,
     content: @Composable () -> Unit
 ) {
+    val expansionCommand = LocalCardExpansionCommand.current
     var infoExpanded by rememberSaveable(title) { mutableStateOf(false) }
     var collapsed by rememberSaveable("$title:collapsed") { mutableStateOf(true) }
     val educationalInfo = educationalInfoForTitle(title)
+    val whyMatters = whyMattersForTitle(title)
+    LaunchedEffect(expansionCommand.version) {
+        collapsed = expansionCommand.collapsed
+    }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -2952,7 +3015,7 @@ private fun InsightCardShell(
             if (!collapsed) {
                 if (infoExpanded) {
                     Spacer(Modifier.height(8.dp))
-                    EducationalInfoPanel(text = educationalInfo, accent = accent)
+                    EducationalInfoPanel(text = educationalInfo, whyMatters = whyMatters, accent = accent)
                 }
                 // Data source + diagnostic info
                 if (meta != null && showDiagnostics) {
@@ -3012,6 +3075,7 @@ private fun InsightCardShell(
 @Composable
 private fun EducationalInfoPanel(
     text: String,
+    whyMatters: String,
     accent: Color,
     modifier: Modifier = Modifier
 ) {
@@ -3023,15 +3087,6 @@ private fun EducationalInfoPanel(
             .padding(10.dp)
     ) {
         Text(
-            "PLAIN ENGLISH",
-            fontSize = 9.sp,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold,
-            color = accent,
-            letterSpacing = 1.sp
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
             text,
             fontSize = 11.sp,
             lineHeight = 15.sp,
@@ -3041,17 +3096,7 @@ private fun EducationalInfoPanel(
         HorizontalDivider(color = accent.copy(alpha = 0.25f))
         Spacer(Modifier.height(6.dp))
         Text(
-            "WHY IT MATTERS",
-            fontSize = 9.sp,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold,
-            color = accent,
-            letterSpacing = 1.sp
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "These patterns can be useful for self-awareness, but they can also be used to target ads, " +
-                "raise prices, infer private life events, pressure habits, or judge people without their knowledge.",
+            whyMatters,
             fontSize = 11.sp,
             lineHeight = 15.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -3143,6 +3188,92 @@ private fun educationalInfoForTitle(title: String): String = when (title) {
 
     else ->
         "Explains what this card infers, which signals support it, and why the pattern is useful for behavioral profiling. Treat every result as probabilistic: stronger data coverage raises confidence, while sparse or stale data should be read cautiously."
+}
+
+private fun whyMattersForTitle(title: String): String = when (title) {
+    "Today" ->
+        "This kind of daily baseline is enough to flag whether someone was unusually active, offline, sedentary, or generating far more data than normal."
+
+    "Sleep" ->
+        "Sleep windows reveal routine, fatigue, late nights, overnight disruptions, and the hours when someone is least likely to respond."
+
+    "App Attention (7d)" ->
+        "Attention rankings show which apps actually dominate time, which is the basis for habit scoring, ad targeting, and product-retention strategy."
+
+    "Anomaly Feed" ->
+        "Outliers matter because sudden changes often point to travel, illness, stress, device trouble, or a break from normal routine."
+
+    "Location Clusters" ->
+        "Recurring places let an observer map physical life patterns and connect behavior to home, work, errands, or sensitive destinations."
+
+    "Unlock After Notification" ->
+        "Fast post-notification unlocks reveal which apps can reliably pull attention back and when those interruptions succeed."
+
+    "Fingerprint Stability" ->
+        "Stable identity fields make long-term device recognition easier, while changes help detect resets, upgrades, or privacy countermeasures."
+
+    "Monthly Trends" ->
+        "Long-range shifts are more useful than a single day because they show durable change in attention, mobility, or collection coverage."
+
+    "Engagement Score" ->
+        "A single engagement number is easy to rank and act on, which is why both growth teams and surveillance systems use it as a shorthand for habit strength."
+
+    "Privacy Radar" ->
+        "Sensitive-access patterns help separate ordinary apps from those that reach deeply into private life, which is useful for risk review and threat modeling."
+
+    "Data Flow" ->
+        "Network volume can expose background syncing, large uploads, or telemetry even when an app is not visibly in use."
+
+    "App Compulsion Index" ->
+        "Repeated reopen behavior is a strong signal of checking loops and which apps have learned how to pull attention back quickly."
+
+    "Device Health" ->
+        "Device condition explains whether heat, low resources, battery state, or a restart may be distorting the rest of the behavioral picture."
+
+    "Identity Entropy" ->
+        "The more unique a device looks, the easier it is to recognize and follow across time, apps, and data brokers."
+
+    "Home & Work" ->
+        "Home and work are anchor points for a life pattern; once they are known, commute, schedule, and unusual absences become much easier to infer."
+
+    "Circadian Rhythm" ->
+        "Activity timing makes it easier to predict when someone sleeps, works, socializes, or is most persuadable by messages and notifications."
+
+    "Routine Predictability" ->
+        "Predictable patterns are valuable because future behavior becomes easier to forecast without needing constant fresh observation."
+
+    "Social Pressure" ->
+        "This shows which channels or apps successfully demand attention, exposing work expectations, relationship dynamics, and interruption pressure."
+
+    "App Portfolio" ->
+        "Installed apps expose interests and life roles even without active use, which is why app inventories are heavily used for profiling."
+
+    "Charging Behavior" ->
+        "Charging habits quietly reveal when the phone is idle, near a bed, in a car, at a desk, or under stress from heavy daily use."
+
+    "WiFi Footprint" ->
+        "Network history can stand in for location history, making recurring places and movement patterns visible even without GPS."
+
+    "Session Fragmentation" ->
+        "Attention fragmentation helps distinguish focused work from constant checking, which says a lot about distraction load and app-driven interruption."
+
+    "Dwell Times" ->
+        "Time spent at places is often more revealing than the places themselves because it separates anchors from brief pass-through stops."
+
+    "Weekday vs Weekend" ->
+        "Comparing routine days with off days shows whether behavior is driven more by work structure or free time, even when the schedule is nontraditional."
+
+    "Income Inference" ->
+        "Even rough socioeconomic guesses can shape offers, fraud scoring, ad targeting, and which users get treated as more or less valuable."
+
+    "Commute Pattern" ->
+        "Commute regularity exposes schedule rigidity, travel burden, and where someone is likely to be at specific times of day."
+
+    "Voice Context" ->
+        "Speech-derived context can reveal meetings, errands, family time, and media use that other device signals might miss."
+
+    else ->
+        "Once a pattern is stable enough to summarize, it can be compared, ranked, predicted, and acted on by whoever has the data."
 }
 
 @Composable
