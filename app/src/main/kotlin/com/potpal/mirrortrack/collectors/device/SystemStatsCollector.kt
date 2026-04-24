@@ -35,27 +35,26 @@ class SystemStatsCollector @Inject constructor() : Collector {
     override val id = "system_stats"
     override val displayName = "System Stats"
     override val rationale =
-        "Collects running processes, memory pressure, CPU info, and thermal " +
-        "state. With DUMP permission, sees all running apps — not just this one. " +
-        "Requires ADB grant: DUMP."
+        "Collects memory pressure, CPU info, uptime, thermal state, and visible " +
+        "process basics. With optional DUMP permission, process visibility can be broader."
     override val category = Category.DEVICE_IDENTITY
-    override val requiredPermissions: List<String> = listOf("android.permission.DUMP")
-    override val accessTier = AccessTier.ADB
+    override val requiredPermissions: List<String> = emptyList()
+    override val accessTier = AccessTier.NONE
     override val defaultEnabled = false
     override val defaultPollInterval: Duration = 30.minutes
     override val defaultRetention: Duration = 30.days
 
-    override suspend fun isAvailable(context: Context): Boolean {
-        return context.checkCallingOrSelfPermission(
-            "android.permission.DUMP"
-        ) == PackageManager.PERMISSION_GRANTED
-    }
+    override suspend fun isAvailable(context: Context): Boolean = true
 
     override suspend fun collect(context: Context): List<DataPoint> {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
             ?: return emptyList()
 
         val points = mutableListOf<DataPoint>()
+        val hasDumpPermission = context.checkCallingOrSelfPermission(
+            "android.permission.DUMP"
+        ) == PackageManager.PERMISSION_GRANTED
+        points.add(DataPoint.bool(id, category, "dump_permission_granted", hasDumpPermission))
 
         // ── Memory info ──────────────────────────────────────────────
         val memInfo = ActivityManager.MemoryInfo()

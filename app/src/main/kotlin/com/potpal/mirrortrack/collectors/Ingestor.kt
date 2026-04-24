@@ -37,9 +37,9 @@ class Ingestor @Inject constructor(
 ) {
     companion object {
         private const val TAG = "Ingestor"
-        private const val FLUSH_THRESHOLD = 100
+        private const val FLUSH_THRESHOLD = 25
         private const val BUFFER_CAPACITY = 2_000
-        private const val FLUSH_INTERVAL_MS = 60_000L
+        private const val FLUSH_INTERVAL_MS = 15_000L
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())

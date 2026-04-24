@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Bed
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Fingerprint
@@ -82,6 +83,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -104,9 +106,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.potpal.mirrortrack.ui.help.HelpScreen
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.delay
 import kotlin.math.pow
 
 // ── Terminal palette ─────────────────────────────────────────────────
@@ -129,6 +133,21 @@ fun InsightsScreen(
     viewModel: InsightsViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    var showHelp by rememberSaveable { mutableStateOf(false) }
+
+    if (showHelp) {
+        HelpScreen(
+            onBack = { showHelp = false }
+        )
+        return
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(15_000)
+            viewModel.refresh(showLoading = false)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -150,6 +169,13 @@ fun InsightsScreen(
                     }
                     IconButton(onClick = { viewModel.refresh() }) {
                         Icon(Icons.Default.Refresh, "Refresh", tint = TerminalGreen)
+                    }
+                    IconButton(onClick = { showHelp = true }) {
+                        Icon(
+                            Icons.Default.Info,
+                            "Methodology",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(Icons.Default.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -230,11 +256,15 @@ fun InsightsScreen(
                                 lineHeight = 14.sp
                             )
                         }
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "Card badges: STALE means the newest supporting data is old. LOW and MED are confidence warnings; they mean the card has limited or mixed evidence. Cards with no badge are high confidence.",
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = DimGray,
+                            lineHeight = 14.sp
+                        )
                     }
-                }
-
-                item(key = "surveillance_primer") {
-                    SurveillancePrimerCard()
                 }
 
                 // High-level behavioral summary
@@ -252,14 +282,6 @@ fun InsightsScreen(
                             meta = meta["sleep"],
                             showDiagnostics = diag
                         )
-                    }
-                }
-                if (state.anomalies.isNotEmpty()) {
-                    item(key = "anomaly_header") {
-                        SectionLabel("ANOMALY FEED", Icons.Default.Warning, TerminalAmber)
-                    }
-                    items(state.anomalies, key = { it.id }) { anomaly ->
-                        AnomalyCard(anomaly, onDismiss = { viewModel.dismissAnomaly(anomaly.id) })
                     }
                 }
 
@@ -349,6 +371,15 @@ fun InsightsScreen(
                     item(key = "entropy") { IdentityEntropyCard(entropy, meta["entropy"], diag) }
                 }
 
+                if (state.anomalies.isNotEmpty()) {
+                    item(key = "anomaly_header") {
+                        SectionLabel("ANOMALY FEED", Icons.Default.Warning, TerminalAmber)
+                    }
+                    items(state.anomalies, key = { it.id }) { anomaly ->
+                        AnomalyCard(anomaly, onDismiss = { viewModel.dismissAnomaly(anomaly.id) })
+                    }
+                }
+
                 val unavailableInsights = unavailableInsightsFor(state)
                 if (unavailableInsights.isNotEmpty()) {
                     item(key = "unavailable_header") {
@@ -401,77 +432,9 @@ private fun unavailableInsightsFor(state: InsightsState): List<UnavailableInsigh
     if (state.identityEntropy == null) add(UnavailableInsight("Identity Entropy", Icons.Default.Fingerprint, "Waiting for enough device traits to show how uniqueness is estimated."))
 }
 
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun SurveillancePrimerCard() {
-    var collapsed by rememberSaveable("surveillance_primer:collapsed") { mutableStateOf(false) }
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .animateContentSize(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Info, null, tint = TerminalAmber, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "Surveillance in plain English",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f)
-                )
-                IconButton(onClick = { collapsed = !collapsed }, modifier = Modifier.size(28.dp)) {
-                    Icon(
-                        if (collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
-                        if (collapsed) "Expand surveillance primer" else "Collapse surveillance primer",
-                        tint = DimGray,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-            if (!collapsed) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "A data point is one small fact, like an unlock time or Wi-Fi name. " +
-                        "An inference is a guess made by combining many facts, like likely bedtime, commute, or stress. " +
-                        "The risk is not one permission by itself; it is the pattern that appears when ordinary signals are collected for days.",
-                    fontSize = 11.sp,
-                    lineHeight = 16.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(8.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    listOf(
-                        "data point = one clue",
-                        "inference = educated guess",
-                        "profile = repeated pattern",
-                        "confidence = how strong the evidence is"
-                    ).forEach { label ->
-                        Text(
-                            label,
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = TerminalAmber,
-                            modifier = Modifier
-                                .background(TerminalAmber.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                                .padding(horizontal = 6.dp, vertical = 3.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
 @Composable
 private fun UnavailableInsightCard(insight: UnavailableInsight) {
-    var collapsed by rememberSaveable("${insight.title}:unavailable:collapsed") { mutableStateOf(false) }
+    var collapsed by rememberSaveable("${insight.title}:unavailable:collapsed") { mutableStateOf(true) }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -493,6 +456,15 @@ private fun UnavailableInsightCard(insight: UnavailableInsight) {
                 Icon(insight.icon, null, tint = DimGray, modifier = Modifier.size(18.dp))
             }
             Spacer(Modifier.width(10.dp))
+            IconButton(onClick = { collapsed = !collapsed }, modifier = Modifier.size(28.dp)) {
+                Icon(
+                    if (collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                    if (collapsed) "Expand ${insight.title}" else "Collapse ${insight.title}",
+                    tint = DimGray,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Spacer(Modifier.width(6.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     insight.title,
@@ -520,14 +492,6 @@ private fun UnavailableInsightCard(insight: UnavailableInsight) {
                         .padding(horizontal = 5.dp, vertical = 2.dp)
                 )
                 Spacer(Modifier.width(4.dp))
-            }
-            IconButton(onClick = { collapsed = !collapsed }, modifier = Modifier.size(28.dp)) {
-                Icon(
-                    if (collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
-                    if (collapsed) "Expand ${insight.title}" else "Collapse ${insight.title}",
-                    tint = DimGray,
-                    modifier = Modifier.size(18.dp)
-                )
             }
         }
     }
@@ -956,7 +920,7 @@ private fun AppAttentionCard(apps: List<AppAttention>, meta: InsightMeta? = null
 @Composable
 private fun AnomalyCard(anomaly: Anomaly, onDismiss: () -> Unit) {
     var infoExpanded by rememberSaveable(anomaly.id) { mutableStateOf(false) }
-    var collapsed by rememberSaveable("${anomaly.id}:collapsed") { mutableStateOf(false) }
+    var collapsed by rememberSaveable("${anomaly.id}:collapsed") { mutableStateOf(true) }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -978,6 +942,15 @@ private fun AnomalyCard(anomaly: Anomaly, onDismiss: () -> Unit) {
                 Icon(Icons.Default.Warning, null, tint = TerminalAmber, modifier = Modifier.size(18.dp))
             }
             Spacer(Modifier.width(10.dp))
+            IconButton(onClick = { collapsed = !collapsed }, modifier = Modifier.size(28.dp)) {
+                Icon(
+                    if (collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                    if (collapsed) "Expand anomaly card" else "Collapse anomaly card",
+                    tint = DimGray,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Spacer(Modifier.width(6.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     anomaly.title,
@@ -1018,14 +991,6 @@ private fun AnomalyCard(anomaly: Anomaly, onDismiss: () -> Unit) {
                     "Explain anomaly card",
                     tint = if (infoExpanded) TerminalAmber else DimGray,
                     modifier = Modifier.size(16.dp)
-                )
-            }
-            IconButton(onClick = { collapsed = !collapsed }, modifier = Modifier.size(28.dp)) {
-                Icon(
-                    if (collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
-                    if (collapsed) "Expand anomaly card" else "Collapse anomaly card",
-                    tint = DimGray,
-                    modifier = Modifier.size(18.dp)
                 )
             }
             IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
@@ -2940,7 +2905,7 @@ private fun InsightCardShell(
     content: @Composable () -> Unit
 ) {
     var infoExpanded by rememberSaveable(title) { mutableStateOf(false) }
-    var collapsed by rememberSaveable("$title:collapsed") { mutableStateOf(false) }
+    var collapsed by rememberSaveable("$title:collapsed") { mutableStateOf(true) }
     val educationalInfo = educationalInfoForTitle(title)
     Card(
         modifier = Modifier
@@ -2961,6 +2926,15 @@ private fun InsightCardShell(
                     Icon(icon, null, tint = accent, modifier = Modifier.size(18.dp))
                 }
                 Spacer(Modifier.width(10.dp))
+                IconButton(onClick = { collapsed = !collapsed }, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        if (collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                        if (collapsed) "Expand $title" else "Collapse $title",
+                        tint = DimGray,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Spacer(Modifier.width(6.dp))
                 Text(
                     title,
                     style = MaterialTheme.typography.titleMedium,
@@ -2980,15 +2954,6 @@ private fun InsightCardShell(
                         "Explain $title",
                         tint = if (infoExpanded) accent else DimGray,
                         modifier = Modifier.size(16.dp)
-                    )
-                }
-                Spacer(Modifier.width(4.dp))
-                IconButton(onClick = { collapsed = !collapsed }, modifier = Modifier.size(28.dp)) {
-                    Icon(
-                        if (collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
-                        if (collapsed) "Expand $title" else "Collapse $title",
-                        tint = DimGray,
-                        modifier = Modifier.size(18.dp)
                     )
                 }
                 Spacer(Modifier.width(4.dp))
@@ -3172,7 +3137,7 @@ private fun educationalInfoForTitle(title: String): String = when (title) {
         "Compares behavior across months: data volume, daily unlocks, screen time, and steps. Long-range trends show whether attention, mobility, and collection coverage are rising or falling. These shifts are often more useful than a single day because they reveal durable lifestyle changes."
 
     "Engagement Score" ->
-        "Summarizes daily and weekly activity into stickiness: active days, sessions per day, session duration, and retention flags. Product analytics systems use this to decide whether someone is casual, habitual, at risk of churn, or highly engaged."
+        "Summarizes daily and weekly activity into stickiness: active days, sessions per day, session duration, and retention flags. Product analytics systems use this to decide whether someone is casual, habitual, at risk of churn, or highly engaged. A high score usually means frequent, repeated, consistent phone interaction. That can reveal habit strength, dependency patterns, work rhythm, or when someone is reliably reachable."
 
     "Privacy Radar" ->
         "Scores apps by sensitive access patterns such as camera, microphone, location, and contacts. A high score means an app touches more personal surfaces or does so more often. This mirrors privacy-risk ranking used in app audits and mobile threat analysis."

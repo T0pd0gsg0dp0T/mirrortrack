@@ -57,12 +57,13 @@ class VoiceTranscriptionCollector @Inject constructor() : Collector {
             PackageManager.PERMISSION_GRANTED
 
     override fun stream(context: Context): Flow<DataPoint> = flow {
-        val modelDir = findModelDir(context)
+        val modelDir = VoiceModelInstaller.ensureInstalled(context)
         if (modelDir == null) {
             emit(DataPoint.string(id, category, "model_status", "missing"))
-            emit(DataPoint.string(id, category, "model_expected_path", expectedModelPath(context)))
+            emit(DataPoint.string(id, category, "model_expected_path", VoiceModelInstaller.expectedModelPath(context)))
             return@flow
         }
+        emit(DataPoint.string(id, category, "model_status", "ready"))
 
         val model = withContext(Dispatchers.IO) { Model(modelDir.absolutePath) }
         try {
@@ -208,21 +209,6 @@ class VoiceTranscriptionCollector @Inject constructor() : Collector {
             ""
         }
 
-    private fun findModelDir(context: Context): File? =
-        modelCandidates(context).firstOrNull { dir ->
-            dir.isDirectory && File(dir, "am").exists() && File(dir, "conf").exists()
-        }
-
-    private fun expectedModelPath(context: Context): String =
-        File(context.filesDir, MODEL_DIR_NAME).absolutePath
-
-    private fun modelCandidates(context: Context): List<File> = listOfNotNull(
-        File(context.filesDir, MODEL_DIR_NAME),
-        File(context.filesDir, "vosk/model"),
-        context.getExternalFilesDir(null)?.let { File(it, MODEL_DIR_NAME) },
-        context.getExternalFilesDir(null)?.let { File(it, "vosk/model") }
-    )
-
     private data class TranscriptWindow(
         val startedAt: Long,
         val durationMs: Long,
@@ -235,7 +221,6 @@ class VoiceTranscriptionCollector @Inject constructor() : Collector {
         const val SAMPLE_RATE = 16_000.0f
         const val WINDOW_MS = 20_000
         const val SAMPLE_INTERVAL_MS = 10 * 60_000L
-        const val MODEL_DIR_NAME = "vosk-model-small-en-us-0.15"
         const val MIN_WORDS_FOR_CONTEXT = 4
 
         val json = Json { ignoreUnknownKeys = true }
@@ -250,5 +235,92 @@ class VoiceTranscriptionCollector @Inject constructor() : Collector {
             "errand" to listOf("store", "groceries", "appointment", "pickup", "pharmacy"),
             "media" to listOf("subscribe", "episode", "breaking news", "advertisement", "sponsored")
         )
+    }
+}
+
+object VoiceModelInstaller {
+    private const val MODEL_DIR_NAME = "vosk-model-small-en-us-0.15"
+
+    fun isInstalled(context: Context): Boolean =
+        findModelDir(context) != null
+
+    suspend fun ensureInstalled(context: Context): File? =
+        withContext(Dispatchers.IO) {
+            findModelDir(context)?.let { return@withContext it }
+            if (!assetPathExists(context, MODEL_DIR_NAME)) return@withContext null
+
+            val target = File(context.filesDir, MODEL_DIR_NAME)
+            val staging = File(context.filesDir, "$MODEL_DIR_NAME.tmp")
+            try {
+                if (staging.exists()) staging.deleteRecursively()
+                staging.mkdirs()
+                copyAssetTree(context, MODEL_DIR_NAME, staging)
+                if (!File(staging, "am").exists() || !File(staging, "conf").exists()) {
+                    staging.deleteRecursively()
+                    return@withContext null
+                }
+                if (target.exists()) target.deleteRecursively()
+                if (!staging.renameTo(target)) {
+                    copyDirectory(staging, target)
+                    staging.deleteRecursively()
+                }
+                findModelDir(context)
+            } catch (e: Exception) {
+                Logger.w("VoiceModelInstaller", "Unable to install bundled voice model", e)
+                staging.deleteRecursively()
+                null
+            }
+        }
+
+    fun expectedModelPath(context: Context): String =
+        File(context.filesDir, MODEL_DIR_NAME).absolutePath
+
+    private fun findModelDir(context: Context): File? =
+        modelCandidates(context).firstOrNull { dir ->
+            dir.isDirectory && File(dir, "am").exists() && File(dir, "conf").exists()
+        }
+
+    private fun modelCandidates(context: Context): List<File> = listOfNotNull(
+        File(context.filesDir, MODEL_DIR_NAME),
+        File(context.filesDir, "vosk/model"),
+        context.getExternalFilesDir(null)?.let { File(it, MODEL_DIR_NAME) },
+        context.getExternalFilesDir(null)?.let { File(it, "vosk/model") }
+    )
+
+    private fun assetPathExists(context: Context, path: String): Boolean =
+        try {
+            context.assets.list(path) != null
+        } catch (_: Exception) {
+            false
+        }
+
+    private fun copyAssetTree(context: Context, assetPath: String, targetDir: File) {
+        val children = context.assets.list(assetPath).orEmpty()
+        if (children.isEmpty()) {
+            targetDir.parentFile?.mkdirs()
+            context.assets.open(assetPath).use { input ->
+                targetDir.outputStream().use { output -> input.copyTo(output) }
+            }
+            return
+        }
+
+        targetDir.mkdirs()
+        children.forEach { child ->
+            copyAssetTree(context, "$assetPath/$child", File(targetDir, child))
+        }
+    }
+
+    private fun copyDirectory(source: File, target: File) {
+        if (source.isDirectory) {
+            target.mkdirs()
+            source.listFiles().orEmpty().forEach { child ->
+                copyDirectory(child, File(target, child.name))
+            }
+        } else {
+            target.parentFile?.mkdirs()
+            source.inputStream().use { input ->
+                target.outputStream().use { output -> input.copyTo(output) }
+            }
+        }
     }
 }

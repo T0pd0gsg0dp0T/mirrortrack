@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.potpal.mirrortrack.data.CryptoManager
 import com.potpal.mirrortrack.data.DatabaseHolder
+import com.potpal.mirrortrack.scheduling.CollectionScheduler
 import com.potpal.mirrortrack.settings.CollectorPreferences
 import com.potpal.mirrortrack.util.Logger
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -28,7 +29,8 @@ class UnlockViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val cryptoManager: CryptoManager,
     private val databaseHolder: DatabaseHolder,
-    private val prefs: CollectorPreferences
+    private val prefs: CollectorPreferences,
+    private val scheduler: CollectionScheduler
 ) : ViewModel() {
 
     private val _state = MutableStateFlow<UnlockUiState>(UnlockUiState.Idle)
@@ -60,6 +62,7 @@ class UnlockViewModel @Inject constructor(
                 // passphrase is already zeroed by deriveKey
                 try {
                     databaseHolder.open(rawKey)
+                    scheduler.refreshAll()
                     // rawKey is zeroed by DatabaseHolder.open
                     _state.value = UnlockUiState.Success
                 } catch (e: Exception) {

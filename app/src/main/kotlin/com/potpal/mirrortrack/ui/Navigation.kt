@@ -24,7 +24,6 @@ object Routes {
     const val DATAPOINT_DETAIL = "datapoint/{rowId}"
     const val SETTINGS = "settings"
     const val PERMISSIONS = "permissions"
-
     fun categoryDetail(categoryName: String) = "category/$categoryName"
     fun datapointDetail(rowId: Long) = "datapoint/$rowId"
 }
