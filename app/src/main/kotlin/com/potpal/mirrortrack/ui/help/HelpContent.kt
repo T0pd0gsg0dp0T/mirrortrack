@@ -22,14 +22,6 @@ object HelpContent {
             intro = "Start here. These panels explain the parts of the Insights screen that affect every card: counts, confidence, diagnostics, and unavailable cards.",
             cards = listOf(
                 HelpCard(
-                    title = "Surveillance In Plain English",
-                    summary = "MirrorTrack turns small, ordinary phone facts into larger behavioral guesses.",
-                    calculation = "A data point is one clue, such as an unlock, Wi-Fi name, notification, light reading, or app switch. An inference is an educated guess built by combining many clues, such as likely bedtime, commute, work rhythm, social pressure, or habit strength.",
-                    dataUsed = "Potentially any enabled collector. The point is the combination effect across time, not one specific signal.",
-                    permissions = "Varies by collector.",
-                    notes = "The main privacy risk is usually not one permission by itself. It is the pattern that appears when many ordinary signals are collected for days or weeks."
-                ),
-                HelpCard(
                     title = "Collection Header",
                     summary = "Shows how many encrypted data points MirrorTrack has stored and how those points are distributed across major categories.",
                     calculation = "The total is a direct database row count. Category totals come from grouping saved data points by collector category.",

@@ -89,13 +89,13 @@ fun HelpScreen(
             item {
                 Column(modifier = Modifier.padding(top = 8.dp)) {
                     Text(
-                        "MirrorTrack turns raw on-device signals into understandable surveillance inferences.",
+                        "Your phone produces small clues all day: unlocks, motion, app use, locations, notifications, sound, light, and network activity.",
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onBackground
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "Use this page to see what each card means, how it is calculated, which data sources it uses, and which permissions or special access paths it depends on.",
+                        "One clue rarely says much. Combined over time, those clues can describe routine, relationships, sleep, work rhythm, habits, and likely weak spots. This page explains how each card is calculated, what data it uses, and what access it depends on.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

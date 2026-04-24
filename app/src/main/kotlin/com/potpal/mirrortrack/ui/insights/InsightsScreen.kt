@@ -215,58 +215,6 @@ fun InsightsScreen(
                     )
                 }
 
-                // ── DIVIDER: what this data reveals ─────────────────
-                item(key = "inference_divider") {
-                    Column(modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)) {
-                        HorizontalDivider(color = DimGray.copy(alpha = 0.3f))
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "WHAT THIS DATA REVEALS",
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = TerminalAmber,
-                            letterSpacing = 2.sp
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "Your phone produces tiny clues all day: unlocks, motion, app use, " +
-                            "locations, notifications, sound, light, and network activity. Alone, " +
-                            "each clue seems harmless. Combined over time, they can describe your " +
-                            "routine, relationships, sleep, work schedule, habits, and likely weak spots.",
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = DimGray,
-                            lineHeight = 16.sp
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Default.Speed,
-                                null,
-                                tint = if (diag) TerminalAmber else DimGray,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                "The speedometer button shows diagnostics: data source, point count, age, and fallback signals behind each card.",
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
-                                color = if (diag) TerminalAmber else DimGray,
-                                lineHeight = 14.sp
-                            )
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            "Card badges: STALE means the newest supporting data is old. LOW and MED are confidence warnings; they mean the card has limited or mixed evidence. Cards with no badge are high confidence.",
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = DimGray,
-                            lineHeight = 14.sp
-                        )
-                    }
-                }
-
                 // High-level behavioral summary
                 state.engagement?.let { eng ->
                     item(key = "engagement") { EngagementCard(eng, meta["engagement"], diag) }
