@@ -201,6 +201,31 @@ class CollectorPreferences @Inject constructor(
         }
     }
 
+    fun getInsightCardOrder(): Flow<List<String>> =
+        context.collectorDataStore.data.map { prefs ->
+            prefs[stringPreferencesKey("insights.card_order")]
+                ?.split("|")
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?: emptyList()
+        }
+
+    suspend fun setInsightCardOrder(order: List<String>) {
+        context.collectorDataStore.edit { prefs ->
+            prefs[stringPreferencesKey("insights.card_order")] = order
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct()
+                .joinToString("|")
+        }
+    }
+
+    suspend fun clearInsightCardOrder() {
+        context.collectorDataStore.edit { prefs ->
+            prefs.remove(stringPreferencesKey("insights.card_order"))
+        }
+    }
+
     // --- Insights: anomaly thresholds ---
 
     fun getAnomalyThreshold(key: String, default: Float): Flow<Float> =

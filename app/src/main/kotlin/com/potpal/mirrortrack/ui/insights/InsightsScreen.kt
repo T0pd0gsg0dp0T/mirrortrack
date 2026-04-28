@@ -4,12 +4,14 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -46,7 +49,6 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Repeat
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SwapVert
@@ -59,6 +61,7 @@ import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Settings
@@ -101,15 +104,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.res.painterResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.potpal.mirrortrack.R
 import com.potpal.mirrortrack.ui.help.HelpScreen
+import java.text.NumberFormat
 import java.time.Instant
+import java.util.Locale
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.delay
@@ -134,6 +143,22 @@ private val LocalCardExpansionCommand = staticCompositionLocalOf {
     CardExpansionCommand(collapsed = true, version = 0)
 }
 
+private enum class InsightCardGroup(val label: String, val accent: Color) {
+    SUMMARY("Summary", TerminalGreen),
+    PATTERN("Pattern", TerminalBlue),
+    ATTENTION("Attention", TerminalRed),
+    CONTEXT("Context", TerminalPurple),
+    TECHNICAL("Technical", TerminalAmber)
+}
+
+private enum class CardSortField(val label: String) {
+    MANUAL("Manual"),
+    GROUP("Group"),
+    FRESHNESS("Freshness"),
+    CONFIDENCE("Confidence"),
+    TITLE("Title")
+}
+
 // ── Root screen ──────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -145,19 +170,184 @@ fun InsightsScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var showHelp by rememberSaveable { mutableStateOf(false) }
+    var showSortControls by rememberSaveable { mutableStateOf(false) }
     var collapseAllCards by rememberSaveable { mutableStateOf(true) }
     var expansionCommandVersion by rememberSaveable { mutableStateOf(0) }
-    val permissionIndicatorColor = when {
-        state.trackedPermissionCount == 0 -> DimGray
-        state.missingPermissionCount == 0 -> TerminalGreen
-        state.missingPermissionCount == 1 -> TerminalAmber
-        else -> TerminalRed
+    var sortField by rememberSaveable { mutableStateOf(CardSortField.MANUAL) }
+    var sortDescending by rememberSaveable { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    var draggingCardKey by remember { mutableStateOf<String?>(null) }
+    var draggingOffsetY by remember { mutableStateOf(0f) }
+    val meta = state.cardMeta
+    val diag = state.showDiagnostics
+    val activeCards = buildList {
+        state.engagement?.let { eng ->
+            add(ActiveInsightCard("engagement", "Engagement Score", meta["engagement"], InsightCardGroup.SUMMARY) {
+                EngagementCard(eng, meta["engagement"], diag)
+            })
+        }
+        state.today?.let { today ->
+            add(ActiveInsightCard("today", "Today", meta["today"], InsightCardGroup.SUMMARY) {
+                TodayCard(today, meta["today"], diag)
+            })
+        }
+        if (state.sleepDays.isNotEmpty() || state.sleepIntervals72h.isNotEmpty()) {
+            add(ActiveInsightCard("sleep", "Sleep", meta["sleep"], InsightCardGroup.SUMMARY) {
+                SleepTimelineCard(
+                    days = state.sleepDays,
+                    intervals = state.sleepIntervals72h,
+                    meta = meta["sleep"],
+                    showDiagnostics = diag
+                )
+            })
+        }
+        state.homeWork?.let { hw ->
+            add(ActiveInsightCard("homework", "Home & Work", meta["homework"], InsightCardGroup.PATTERN) {
+                HomeWorkCard(hw, meta["homework"], diag)
+            })
+        }
+        state.commute?.takeIf { it.detected }?.let { com ->
+            add(ActiveInsightCard("commute", "Commute Pattern", meta["commute"], InsightCardGroup.PATTERN) {
+                CommuteCard(com, meta["commute"], diag)
+            })
+        }
+        if (state.locationClusters.isNotEmpty()) {
+            add(ActiveInsightCard("location", "Location Clusters", meta["location"], InsightCardGroup.PATTERN) {
+                LocationMapCard(
+                    clusters = state.locationClusters,
+                    onRename = { id, name -> viewModel.renameCluster(id, name) },
+                    meta = meta["location"],
+                    showDiagnostics = diag
+                )
+            })
+        }
+        if (state.dwellTimes.isNotEmpty()) {
+            add(ActiveInsightCard("dwell", "Dwell Times", meta["dwell"], InsightCardGroup.PATTERN) {
+                DwellTimeCard(state.dwellTimes, meta["dwell"], diag)
+            })
+        }
+        state.circadian?.let { circ ->
+            add(ActiveInsightCard("circadian", "Circadian Rhythm", meta["circadian"], InsightCardGroup.PATTERN) {
+                CircadianCard(circ, meta["circadian"], diag)
+            })
+        }
+        state.routine?.let { rout ->
+            add(ActiveInsightCard("routine", "Routine Predictability", meta["routine"], InsightCardGroup.PATTERN) {
+                RoutineCard(rout, meta["routine"], diag)
+            })
+        }
+        state.weekdayWeekend?.let { wdwe ->
+            add(ActiveInsightCard("weekdayweekend", "Weekday vs Weekend", meta["weekdayweekend"], InsightCardGroup.PATTERN) {
+                WeekdayWeekendCard(wdwe, meta["weekdayweekend"], diag)
+            })
+        }
+        if (state.monthlyTrends.size >= 2) {
+            add(ActiveInsightCard("trends", "Monthly Trends", meta["trends"], InsightCardGroup.PATTERN) {
+                MonthlyTrendsCard(state.monthlyTrends, meta["trends"], diag)
+            })
+        }
+        if (state.socialPressure.isNotEmpty()) {
+            add(ActiveInsightCard("social", "Social Pressure", meta["social"], InsightCardGroup.ATTENTION) {
+                SocialPressureCard(state.socialPressure, meta["social"], diag)
+            })
+        }
+        if (state.unlockLatencies.isNotEmpty()) {
+            add(ActiveInsightCard("unlock", "Unlock After Notification", meta["unlock"], InsightCardGroup.ATTENTION) {
+                UnlockLatencyCard(state.unlockLatencies, meta["unlock"], diag)
+            })
+        }
+        if (state.privacyRadar.isNotEmpty()) {
+            add(ActiveInsightCard("privacy", "Privacy Radar", meta["privacy"], InsightCardGroup.ATTENTION) {
+                PrivacyRadarCard(state.privacyRadar, meta["privacy"], diag)
+            })
+        }
+        if (state.appCompulsion.isNotEmpty()) {
+            add(ActiveInsightCard("compulsion", "App Compulsion Index", meta["compulsion"], InsightCardGroup.ATTENTION) {
+                AppCompulsionCard(state.appCompulsion, meta["compulsion"], diag)
+            })
+        }
+        state.sessionFrag?.let { frag ->
+            add(ActiveInsightCard("fragmentation", "Session Fragmentation", meta["fragmentation"], InsightCardGroup.ATTENTION) {
+                FragmentationCard(frag, meta["fragmentation"], diag)
+            })
+        }
+        state.voiceContext?.let { voice ->
+            add(ActiveInsightCard("voice", "Voice Context", meta["voice"], InsightCardGroup.CONTEXT) {
+                VoiceContextCard(voice, meta["voice"], diag)
+            })
+        }
+        state.deviceHealth?.let { health ->
+            add(ActiveInsightCard("health", "Device Health", meta["health"], InsightCardGroup.CONTEXT) {
+                DeviceHealthCard(health, meta["health"], diag)
+            })
+        }
+        state.charging?.let { chg ->
+            add(ActiveInsightCard("charging", "Charging Behavior", meta["charging"], InsightCardGroup.CONTEXT) {
+                ChargingCard(chg, meta["charging"], diag)
+            })
+        }
+        state.income?.let { inc ->
+            add(ActiveInsightCard("income", "Income Inference", meta["income"], InsightCardGroup.CONTEXT) {
+                IncomeCard(inc, meta["income"], diag)
+            })
+        }
+        state.wifiFootprint?.let { wifi ->
+            add(ActiveInsightCard("wifi", "WiFi Footprint", meta["wifi"], InsightCardGroup.CONTEXT) {
+                WiFiCard(wifi, meta["wifi"], diag)
+            })
+        }
+        state.appPortfolio?.let { port ->
+            add(ActiveInsightCard("portfolio", "App Portfolio", meta["portfolio"], InsightCardGroup.CONTEXT) {
+                AppPortfolioCard(port, meta["portfolio"], diag)
+            })
+        }
+        if (state.appAttention.isNotEmpty()) {
+            add(ActiveInsightCard("apps", "App Attention (7d)", meta["apps"], InsightCardGroup.TECHNICAL) {
+                AppAttentionCard(state.appAttention, meta["apps"], diag)
+            })
+        }
+        if (state.dataFlow.isNotEmpty()) {
+            add(ActiveInsightCard("dataflow", "Data Flow", meta["dataflow"], InsightCardGroup.TECHNICAL) {
+                DataFlowCard(state.dataFlow, meta["dataflow"], diag)
+            })
+        }
+        if (state.fingerprint.isNotEmpty()) {
+            add(ActiveInsightCard("fingerprint", "Fingerprint Stability", meta["fingerprint"], InsightCardGroup.TECHNICAL) {
+                FingerprintStabilityCard(state.fingerprint, meta["fingerprint"], diag)
+            })
+        }
+        state.identityEntropy?.let { entropy ->
+            add(ActiveInsightCard("entropy", "Identity Entropy", meta["entropy"], InsightCardGroup.TECHNICAL) {
+                IdentityEntropyCard(entropy, meta["entropy"], diag)
+            })
+        }
     }
-    val permissionIndicatorDescription = when {
-        state.trackedPermissionCount == 0 -> "Permission status unavailable"
-        state.missingPermissionCount == 0 -> "All tracked permissions granted"
-        state.missingPermissionCount == 1 -> "One tracked permission missing"
-        else -> "${state.missingPermissionCount} tracked permissions missing"
+    val defaultCardOrder = activeCards.map { it.key }
+    var localCardOrder by remember(defaultCardOrder, state.cardOrder) {
+        mutableStateOf(resolveCardOrder(defaultCardOrder, state.cardOrder))
+    }
+    val orderedActiveCards = sortActiveCards(
+        cards = activeCards,
+        manualOrder = localCardOrder,
+        sortField = sortField,
+        descending = sortDescending
+    )
+    val canDragCards = sortField == CardSortField.MANUAL
+
+    fun persistCardOrder(order: List<String>) {
+        if (order == defaultCardOrder) {
+            viewModel.clearInsightCardOrder()
+        } else {
+            viewModel.saveInsightCardOrder(order)
+        }
+    }
+
+    fun finishDragging() {
+        if (draggingCardKey != null) {
+            draggingCardKey = null
+            draggingOffsetY = 0f
+            persistCardOrder(localCardOrder)
+        }
     }
 
     if (showHelp) {
@@ -186,41 +376,19 @@ fun InsightsScreen(
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                Icons.Default.Psychology,
-                                permissionIndicatorDescription,
-                                tint = permissionIndicatorColor,
-                                modifier = Modifier.size(24.dp)
+                                painter = painterResource(R.drawable.ic_launcher_foreground),
+                                contentDescription = "MirrorTrack",
+                                tint = Color.Unspecified,
+                                modifier = Modifier.size(32.dp)
                             )
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(Modifier.width(4.dp))
                             Text("MirrorTrack", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                         }
                     },
                     actions = {
-                        IconButton(
-                            onClick = {
-                                collapseAllCards = !collapseAllCards
-                                expansionCommandVersion += 1
-                            }
-                        ) {
-                            Icon(
-                                if (collapseAllCards) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
-                                if (collapseAllCards) "Expand all cards" else "Collapse all cards",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        IconButton(onClick = { viewModel.toggleDiagnostics() }) {
-                            Icon(
-                                Icons.Default.Speed,
-                                "Toggle diagnostics",
-                                tint = if (state.showDiagnostics) TerminalAmber else DimGray
-                            )
-                        }
-                        IconButton(onClick = { viewModel.refresh() }) {
-                            Icon(Icons.Default.Refresh, "Refresh", tint = TerminalGreen)
-                        }
                         IconButton(onClick = { showHelp = true }) {
                             Icon(
-                                Icons.Default.Info,
+                                Icons.AutoMirrored.Filled.HelpOutline,
                                 "Methodology",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -249,142 +417,132 @@ fun InsightsScreen(
                         .fillMaxSize()
                         .padding(padding)
                         .padding(horizontal = 12.dp),
+                    state = listState,
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    val meta = state.cardMeta
-                    val diag = state.showDiagnostics
-
                     // ── COLLECTION SUMMARY ──────────────────────────────
                     item(key = "collection_header") {
                         CollectionHeader(
                             totalDataPoints = state.totalDataPoints,
+                            databaseSizeBytes = state.databaseSizeBytes,
                             categories = state.categoryCounts,
                             onCategoryClick = onNavigateToCategoryDetail
                         )
                     }
 
-                // High-level behavioral summary
-                state.engagement?.let { eng ->
-                    item(key = "engagement") { EngagementCard(eng, meta["engagement"], diag) }
-                }
-                state.today?.let { today ->
-                    item(key = "today") { TodayCard(today, meta["today"], diag) }
-                }
-                if (state.sleepDays.isNotEmpty() || state.sleepIntervals72h.isNotEmpty()) {
-                    item(key = "sleep") {
-                        SleepTimelineCard(
-                            days = state.sleepDays,
-                            intervals = state.sleepIntervals72h,
-                            meta = meta["sleep"],
-                            showDiagnostics = diag
+                    // ── TOOLBAR ROW ─────────────────────────────────────
+                    item(key = "toolbar_row") {
+                        InsightToolbar(
+                            onRefresh = { viewModel.refresh() },
+                            collapseAllCards = collapseAllCards,
+                            onToggleExpand = {
+                                collapseAllCards = !collapseAllCards
+                                expansionCommandVersion += 1
+                            },
+                            showSortControls = showSortControls,
+                            onToggleSort = { showSortControls = !showSortControls },
+                            sortActive = sortField != CardSortField.MANUAL,
+                            showDiagnostics = state.showDiagnostics,
+                            onToggleDiagnostics = { viewModel.toggleDiagnostics() }
                         )
                     }
-                }
 
-                // Routine, schedule, and places
-                state.homeWork?.let { hw ->
-                    item(key = "homework") { HomeWorkCard(hw, meta["homework"], diag) }
-                }
-                state.commute?.let { com ->
-                    if (com.detected) {
-                        item(key = "commute") { CommuteCard(com, meta["commute"], diag) }
+                    if (showSortControls || sortField != CardSortField.MANUAL) {
+                        item(key = "sort_controls") {
+                            SortControls(
+                                activeField = sortField,
+                                descending = sortDescending,
+                                manualEnabled = canDragCards,
+                                onSelect = { field ->
+                                    if (field == CardSortField.MANUAL) {
+                                        sortField = CardSortField.MANUAL
+                                        sortDescending = false
+                                    } else if (sortField == field) {
+                                        sortDescending = !sortDescending
+                                    } else {
+                                        sortField = field
+                                        sortDescending = when (field) {
+                                            CardSortField.FRESHNESS, CardSortField.CONFIDENCE -> true
+                                            else -> false
+                                        }
+                                    }
+                                }
+                            )
+                        }
                     }
-                }
-                if (state.locationClusters.isNotEmpty()) {
-                    item(key = "location") {
-                        LocationMapCard(
-                            clusters = state.locationClusters,
-                            onRename = { id, name -> viewModel.renameCluster(id, name) },
-                            meta = meta["location"],
-                            showDiagnostics = diag
-                        )
-                    }
-                }
-                if (state.dwellTimes.isNotEmpty()) {
-                    item(key = "dwell") { DwellTimeCard(state.dwellTimes, meta["dwell"], diag) }
-                }
-                state.circadian?.let { circ ->
-                    item(key = "circadian") { CircadianCard(circ, meta["circadian"], diag) }
-                }
-                state.routine?.let { rout ->
-                    item(key = "routine") { RoutineCard(rout, meta["routine"], diag) }
-                }
-                state.weekdayWeekend?.let { wdwe ->
-                    item(key = "weekdayweekend") { WeekdayWeekendCard(wdwe, meta["weekdayweekend"], diag) }
-                }
-                if (state.monthlyTrends.size >= 2) {
-                    item(key = "trends") { MonthlyTrendsCard(state.monthlyTrends, meta["trends"], diag) }
-                }
 
-                // Attention, social pressure, and privacy behavior
-                if (state.socialPressure.isNotEmpty()) {
-                    item(key = "social") { SocialPressureCard(state.socialPressure, meta["social"], diag) }
-                }
-                if (state.unlockLatencies.isNotEmpty()) {
-                    item(key = "unlock") { UnlockLatencyCard(state.unlockLatencies, meta["unlock"], diag) }
-                }
-                if (state.privacyRadar.isNotEmpty()) {
-                    item(key = "privacy") { PrivacyRadarCard(state.privacyRadar, meta["privacy"], diag) }
-                }
-                if (state.appCompulsion.isNotEmpty()) {
-                    item(key = "compulsion") { AppCompulsionCard(state.appCompulsion, meta["compulsion"], diag) }
-                }
-                state.sessionFrag?.let { frag ->
-                    item(key = "fragmentation") { FragmentationCard(frag, meta["fragmentation"], diag) }
-                }
+                    items(orderedActiveCards, key = { it.key }) { card ->
+                        val isDragging = draggingCardKey == card.key
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .zIndex(if (isDragging) 1f else 0f)
+                                .pointerInput(card.key, localCardOrder) {
+                                    if (!canDragCards) return@pointerInput
+                                    detectDragGesturesAfterLongPress(
+                                        onDragStart = {
+                                            draggingCardKey = card.key
+                                            draggingOffsetY = 0f
+                                        },
+                                        onDragCancel = { finishDragging() },
+                                        onDragEnd = { finishDragging() },
+                                        onDrag = { change, dragAmount ->
+                                            if (draggingCardKey != card.key) return@detectDragGesturesAfterLongPress
+                                            change.consume()
+                                            draggingOffsetY += dragAmount.y
 
-                // Context, device state, and inferred profile
-                state.voiceContext?.let { voice ->
-                    item(key = "voice") { VoiceContextCard(voice, meta["voice"], diag) }
-                }
-                state.deviceHealth?.let { health ->
-                    item(key = "health") { DeviceHealthCard(health, meta["health"], diag) }
-                }
-                state.charging?.let { chg ->
-                    item(key = "charging") { ChargingCard(chg, meta["charging"], diag) }
-                }
-                state.income?.let { inc ->
-                    item(key = "income") { IncomeCard(inc, meta["income"], diag) }
-                }
-                state.wifiFootprint?.let { wifi ->
-                    item(key = "wifi") { WiFiCard(wifi, meta["wifi"], diag) }
-                }
-                state.appPortfolio?.let { port ->
-                    item(key = "portfolio") { AppPortfolioCard(port, meta["portfolio"], diag) }
-                }
+                                            val visibleItems = listState.layoutInfo.visibleItemsInfo
+                                            val currentItemInfo = visibleItems.firstOrNull { it.key == card.key }
+                                                ?: return@detectDragGesturesAfterLongPress
+                                            val draggedCenter = currentItemInfo.offset + draggingOffsetY + currentItemInfo.size / 2f
+                                            val targetItemInfo = visibleItems.firstOrNull { itemInfo ->
+                                                val itemKey = itemInfo.key as? String ?: return@firstOrNull false
+                                                itemKey != card.key &&
+                                                    draggedCenter >= itemInfo.offset.toFloat() &&
+                                                    draggedCenter <= (itemInfo.offset + itemInfo.size).toFloat()
+                                            } ?: return@detectDragGesturesAfterLongPress
 
-                // Dense technical detail
-                if (state.appAttention.isNotEmpty()) {
-                    item(key = "apps") { AppAttentionCard(state.appAttention, meta["apps"], diag) }
-                }
-                if (state.dataFlow.isNotEmpty()) {
-                    item(key = "dataflow") { DataFlowCard(state.dataFlow, meta["dataflow"], diag) }
-                }
-                if (state.fingerprint.isNotEmpty()) {
-                    item(key = "fingerprint") { FingerprintStabilityCard(state.fingerprint, meta["fingerprint"], diag) }
-                }
-                state.identityEntropy?.let { entropy ->
-                    item(key = "entropy") { IdentityEntropyCard(entropy, meta["entropy"], diag) }
-                }
+                                            val targetKey = targetItemInfo.key as? String ?: return@detectDragGesturesAfterLongPress
+                                            val targetIndex = localCardOrder.indexOf(targetKey)
+                                            val currentIndex = localCardOrder.indexOf(card.key)
+                                            if (targetIndex == -1 || currentIndex == -1 || targetIndex == currentIndex) {
+                                                return@detectDragGesturesAfterLongPress
+                                            }
 
-                if (state.anomalies.isNotEmpty()) {
-                    item(key = "anomaly_header") {
-                        SectionLabel("ANOMALY FEED", Icons.Default.Warning, TerminalAmber)
+                                            draggingOffsetY -= (targetItemInfo.offset - currentItemInfo.offset).toFloat()
+                                            localCardOrder = moveCardToIndex(localCardOrder, card.key, targetIndex)
+                                        }
+                                    )
+                                }
+                                .offset {
+                                    IntOffset(
+                                        x = 0,
+                                        y = if (isDragging) draggingOffsetY.toInt() else 0
+                                    )
+                                }
+                        ) {
+                            card.content()
+                        }
                     }
-                    items(state.anomalies, key = { it.id }) { anomaly ->
-                        AnomalyCard(anomaly, onDismiss = { viewModel.dismissAnomaly(anomaly.id) })
-                    }
-                }
 
-                val unavailableInsights = unavailableInsightsFor(state)
-                if (unavailableInsights.isNotEmpty()) {
-                    item(key = "unavailable_header") {
-                        SectionLabel("UNAVAILABLE INSIGHTS", Icons.Default.Info, DimGray)
+                    if (state.anomalies.isNotEmpty()) {
+                        item(key = "anomaly_header") {
+                            SectionLabel("ANOMALY FEED", Icons.Default.Warning, TerminalAmber)
+                        }
+                        items(state.anomalies, key = { it.id }) { anomaly ->
+                            AnomalyCard(anomaly, onDismiss = { viewModel.dismissAnomaly(anomaly.id) })
+                        }
                     }
-                    items(unavailableInsights, key = { "unavailable_${it.title}" }) { insight ->
-                        UnavailableInsightCard(insight)
+
+                    val unavailableInsights = unavailableInsightsFor(state)
+                    if (unavailableInsights.isNotEmpty()) {
+                        item(key = "unavailable_header") {
+                            SectionLabel("UNAVAILABLE INSIGHTS", Icons.Default.Info, DimGray)
+                        }
+                        items(unavailableInsights, key = { "unavailable_${it.title}" }) { insight ->
+                            UnavailableInsightCard(insight)
+                        }
                     }
-                }
 
                     item { Spacer(Modifier.height(16.dp)) }
                 }
@@ -393,11 +551,87 @@ fun InsightsScreen(
     }
 }
 
+private data class ActiveInsightCard(
+    val key: String,
+    val title: String,
+    val meta: InsightMeta?,
+    val group: InsightCardGroup,
+    val content: @Composable () -> Unit
+)
+
 private data class UnavailableInsight(
     val title: String,
     val icon: ImageVector,
     val reason: String
 )
+
+private fun resolveCardOrder(defaultOrder: List<String>, savedOrder: List<String>): List<String> {
+    if (defaultOrder.isEmpty()) return emptyList()
+    if (savedOrder.isEmpty()) return defaultOrder
+
+    val seen = mutableSetOf<String>()
+    return buildList {
+        for (key in savedOrder) {
+            if (key in defaultOrder && seen.add(key)) add(key)
+        }
+        for (key in defaultOrder) {
+            if (seen.add(key)) add(key)
+        }
+    }
+}
+
+private fun orderActiveCards(cards: List<ActiveInsightCard>, order: List<String>): List<ActiveInsightCard> {
+    if (cards.isEmpty()) return emptyList()
+    val resolvedOrder = resolveCardOrder(cards.map { it.key }, order)
+    val cardsByKey = cards.associateBy { it.key }
+    return resolvedOrder.mapNotNull { cardsByKey[it] }
+}
+
+private fun sortActiveCards(
+    cards: List<ActiveInsightCard>,
+    manualOrder: List<String>,
+    sortField: CardSortField,
+    descending: Boolean
+): List<ActiveInsightCard> {
+    val manualCards = orderActiveCards(cards, manualOrder)
+    if (sortField == CardSortField.MANUAL) return manualCards
+
+    val confidenceRank: (InsightMeta?) -> Int = { meta ->
+        when {
+            meta == null -> -1
+            meta.isStale -> 0
+            meta.confidence == ConfidenceTier.HIGH -> 3
+            meta.confidence == ConfidenceTier.MODERATE -> 2
+            meta.confidence == ConfidenceTier.LOW -> 1
+            else -> -1
+        }
+    }
+
+    val sorted = when (sortField) {
+        CardSortField.MANUAL -> manualCards
+        CardSortField.GROUP -> manualCards.sortedWith(
+            compareBy<ActiveInsightCard>({ it.group.ordinal }, { it.title.lowercase() })
+        )
+        CardSortField.FRESHNESS -> manualCards.sortedWith(
+            compareBy<ActiveInsightCard>({ it.meta?.newestDataMs ?: Long.MIN_VALUE }, { it.title.lowercase() })
+        )
+        CardSortField.CONFIDENCE -> manualCards.sortedWith(
+            compareBy<ActiveInsightCard>({ confidenceRank(it.meta) }, { it.title.lowercase() })
+        )
+        CardSortField.TITLE -> manualCards.sortedBy { it.title.lowercase() }
+    }
+
+    return if (descending) sorted.reversed() else sorted
+}
+
+private fun moveCardToIndex(order: List<String>, key: String, destinationIndex: Int): List<String> {
+    val currentIndex = order.indexOf(key)
+    if (currentIndex == -1) return order
+    val mutable = order.toMutableList()
+    val item = mutable.removeAt(currentIndex)
+    mutable.add(destinationIndex.coerceIn(0, mutable.size), item)
+    return mutable
+}
 
 private fun unavailableInsightsFor(state: InsightsState): List<UnavailableInsight> = buildList {
     if (state.engagement == null) add(UnavailableInsight("Engagement Score", Icons.Default.Speed, "Waiting for enough opens, sessions, and active days to estimate habit strength."))
@@ -432,6 +666,10 @@ private fun unavailableInsightsFor(state: InsightsState): List<UnavailableInsigh
 @Composable
 private fun UnavailableInsightCard(insight: UnavailableInsight) {
     val expansionCommand = LocalCardExpansionCommand.current
+    val accent = when (insight.title) {
+        "Anomaly Feed" -> TerminalAmber
+        else -> insightAccentForTitle(insight.title)
+    }
     var collapsed by rememberSaveable("${insight.title}:unavailable:collapsed") { mutableStateOf(true) }
     LaunchedEffect(expansionCommand.version) {
         collapsed = expansionCommand.collapsed
@@ -451,21 +689,12 @@ private fun UnavailableInsightCard(insight: UnavailableInsight) {
                 modifier = Modifier
                     .size(32.dp)
                     .clip(CircleShape)
-                    .background(DimGray.copy(alpha = 0.15f)),
+                    .background(accent.copy(alpha = 0.14f)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(insight.icon, null, tint = DimGray, modifier = Modifier.size(18.dp))
+                Icon(insight.icon, null, tint = accent.copy(alpha = 0.82f), modifier = Modifier.size(18.dp))
             }
             Spacer(Modifier.width(10.dp))
-            IconButton(onClick = { collapsed = !collapsed }, modifier = Modifier.size(28.dp)) {
-                Icon(
-                    if (collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
-                    if (collapsed) "Expand ${insight.title}" else "Collapse ${insight.title}",
-                    tint = DimGray,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-            Spacer(Modifier.width(6.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     insight.title,
@@ -487,12 +716,20 @@ private fun UnavailableInsightCard(insight: UnavailableInsight) {
                     fontSize = 9.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                    color = DimGray,
+                    color = accent.copy(alpha = 0.82f),
                     modifier = Modifier
-                        .background(DimGray.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                        .background(accent.copy(alpha = 0.14f), RoundedCornerShape(4.dp))
                         .padding(horizontal = 5.dp, vertical = 2.dp)
                 )
                 Spacer(Modifier.width(4.dp))
+            }
+            IconButton(onClick = { collapsed = !collapsed }, modifier = Modifier.size(28.dp)) {
+                Icon(
+                    if (collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                    if (collapsed) "Expand ${insight.title}" else "Collapse ${insight.title}",
+                    tint = DimGray,
+                    modifier = Modifier.size(18.dp)
+                )
             }
         }
     }
@@ -504,6 +741,7 @@ private fun UnavailableInsightCard(insight: UnavailableInsight) {
 @Composable
 private fun CollectionHeader(
     totalDataPoints: Long,
+    databaseSizeBytes: Long,
     categories: List<CategoryCount>,
     onCategoryClick: (String) -> Unit
 ) {
@@ -518,7 +756,8 @@ private fun CollectionHeader(
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            "${formatLargeNumber(totalDataPoints)} data points across ${categories.count { it.count > 0 }} categories",
+            "${formatExactNumber(totalDataPoints)} data points across ${categories.count { it.count > 0 }} categories" +
+                if (databaseSizeBytes > 0) " \u2022 ${formatDatabaseSize(databaseSizeBytes)}" else "",
             fontSize = 11.sp,
             fontFamily = FontFamily.Monospace,
             color = DimGray
@@ -578,7 +817,7 @@ private fun CategoryChip(cat: CategoryCount, onClick: () -> Unit) {
                     maxLines = 1
                 )
                 Text(
-                    if (hasData) formatLargeNumber(cat.count) else "---",
+                    if (hasData) formatExactNumber(cat.count) else "---",
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
@@ -588,6 +827,177 @@ private fun CategoryChip(cat: CategoryCount, onClick: () -> Unit) {
         }
     }
 }
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SortControls(
+    activeField: CardSortField,
+    descending: Boolean,
+    manualEnabled: Boolean,
+    onSelect: (CardSortField) -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "SORT CARDS",
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = TerminalBlue,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    if (activeField == CardSortField.MANUAL) "manual order"
+                    else "${activeField.label.lowercase()} ${if (descending) "desc" else "asc"}",
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = DimGray
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                CardSortField.entries.forEach { field ->
+                    SortChip(
+                        label = buildString {
+                            append(field.label)
+                            if (field == activeField && field != CardSortField.MANUAL) {
+                                append(' ')
+                                append(if (descending) "↓" else "↑")
+                            }
+                        },
+                        active = field == activeField,
+                        onClick = { onSelect(field) }
+                    )
+                }
+            }
+            if (!manualEnabled) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Tap the active sort again to reverse it. Long-press drag works only in Manual mode.",
+                    fontSize = 10.sp,
+                    color = DimGray
+                )
+            } else {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Tap a sort to auto-order cards. Tap it again to reverse.",
+                    fontSize = 10.sp,
+                    color = DimGray
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SortChip(
+    label: String,
+    active: Boolean,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.clickable(onClick = onClick),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (active) TerminalBlue.copy(alpha = 0.14f)
+            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+        )
+    ) {
+        Text(
+            label,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+            color = if (active) TerminalBlue else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+// ── Toolbar row ────────────────────────────────────────────────────
+
+@Composable
+private fun InsightToolbar(
+    onRefresh: () -> Unit,
+    collapseAllCards: Boolean,
+    onToggleExpand: () -> Unit,
+    showSortControls: Boolean,
+    onToggleSort: () -> Unit,
+    sortActive: Boolean,
+    showDiagnostics: Boolean,
+    onToggleDiagnostics: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Left: refresh
+        IconButton(onClick = onRefresh, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Default.Refresh, "Refresh", tint = TerminalGreen, modifier = Modifier.size(20.dp))
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // Diagnostics
+            IconButton(onClick = onToggleDiagnostics, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    Icons.Default.Speed,
+                    "Toggle diagnostics",
+                    tint = if (showDiagnostics) TerminalAmber else DimGray,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            // Sort (next to expand)
+            IconButton(onClick = onToggleSort, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Sort,
+                    "Sort cards",
+                    tint = if (showSortControls || sortActive) TerminalBlue
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            // Expand / Collapse all (farthest right)
+            IconButton(onClick = onToggleExpand, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    if (collapseAllCards) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                    if (collapseAllCards) "Expand all cards" else "Collapse all cards",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    }
+}
+
+private fun insightGroupForTitle(title: String): InsightCardGroup = when (title) {
+    "Engagement Score", "Today", "Sleep", "Sleep Timeline" -> InsightCardGroup.SUMMARY
+    "Home & Work", "Commute Pattern", "Location Clusters", "Dwell Times",
+    "Circadian Rhythm", "Routine Predictability", "Weekday vs Weekend", "Monthly Trends" ->
+        InsightCardGroup.PATTERN
+    "Social Pressure", "Unlock After Notification", "Privacy Radar",
+    "App Compulsion Index", "Session Fragmentation" ->
+        InsightCardGroup.ATTENTION
+    "Voice Context", "Device Health", "Charging Behavior", "Income Inference",
+    "WiFi Footprint", "App Portfolio" ->
+        InsightCardGroup.CONTEXT
+    "App Attention (7d)", "Data Flow", "Fingerprint Stability", "Identity Entropy" ->
+        InsightCardGroup.TECHNICAL
+    else -> InsightCardGroup.SUMMARY
+}
+
+private fun insightAccentForTitle(title: String): Color = insightGroupForTitle(title).accent
 
 // ── Section label ────────────────────────────────────────────────────
 
@@ -614,7 +1024,7 @@ private fun SectionLabel(text: String, icon: ImageVector, color: Color) {
 
 @Composable
 private fun TodayCard(data: TodayData, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Today", icon = Icons.Default.Timeline, accent = TerminalGreen, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "Today", icon = Icons.Default.Timeline, accent = insightAccentForTitle("Today"), meta = meta, showDiagnostics = showDiagnostics) {
         val stats = listOf(
             Triple(Icons.Default.Storage, "${data.dataPoints}", "data points"),
             Triple(Icons.Default.LockOpen, "${data.unlocks}", "unlocks"),
@@ -668,7 +1078,7 @@ private fun SleepTimelineCard(
     meta: InsightMeta? = null,
     showDiagnostics: Boolean = false
 ) {
-    InsightCardShell(title = "Sleep", icon = Icons.Default.Bed, accent = TerminalPurple, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "Sleep", icon = Icons.Default.Bed, accent = insightAccentForTitle("Sleep"), meta = meta, showDiagnostics = showDiagnostics) {
         val now = remember(intervals) { System.currentTimeMillis() }
         val windowMs = 72 * 3_600_000L
         val windowStart = now - windowMs
@@ -855,7 +1265,7 @@ private fun formatTimelineTime(timestampMs: Long): String =
 
 @Composable
 private fun AppAttentionCard(apps: List<AppAttention>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "App Attention (7d)", icon = Icons.Default.Smartphone, accent = TerminalBlue, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "App Attention (7d)", icon = Icons.Default.Smartphone, accent = insightAccentForTitle("App Attention (7d)"), meta = meta, showDiagnostics = showDiagnostics) {
         val maxMs = apps.maxOf { it.foregroundMs7d }.coerceAtLeast(1)
 
         apps.forEachIndexed { i, app ->
@@ -1017,7 +1427,7 @@ private fun LocationMapCard(
 ) {
     var renaming by remember { mutableStateOf<LocationCluster?>(null) }
 
-    InsightCardShell(title = "Location Clusters", icon = Icons.Default.LocationOn, accent = TerminalRed, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "Location Clusters", icon = Icons.Default.LocationOn, accent = insightAccentForTitle("Location Clusters"), meta = meta, showDiagnostics = showDiagnostics) {
         if (clusters.size >= 2) {
             val minLat = clusters.minOf { it.lat }
             val maxLat = clusters.maxOf { it.lat }
@@ -1175,7 +1585,7 @@ private fun UnlockLatencyCard(latencies: List<UnlockLatency>, meta: InsightMeta?
     InsightCardShell(
         title = "Unlock After Notification",
         icon = Icons.Default.Notifications,
-        accent = TerminalAmber,
+        accent = insightAccentForTitle("Unlock After Notification"),
         meta = meta,
         showDiagnostics = showDiagnostics
     ) {
@@ -1235,7 +1645,7 @@ private fun UnlockLatencyCard(latencies: List<UnlockLatency>, meta: InsightMeta?
 
 @Composable
 private fun FingerprintStabilityCard(fields: List<FingerprintField>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Fingerprint Stability", icon = Icons.Default.Fingerprint, accent = TerminalGreen, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "Fingerprint Stability", icon = Icons.Default.Fingerprint, accent = insightAccentForTitle("Fingerprint Stability"), meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Device identity fields and when they last changed",
             fontSize = 10.sp,
@@ -1294,7 +1704,7 @@ private fun FingerprintStabilityCard(fields: List<FingerprintField>, meta: Insig
 
 @Composable
 private fun MonthlyTrendsCard(trends: List<MonthlyTrend>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Monthly Trends", icon = Icons.Default.Timeline, accent = TerminalBlue, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "Monthly Trends", icon = Icons.Default.Timeline, accent = insightAccentForTitle("Monthly Trends"), meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Month-over-month behavioral comparison",
             fontSize = 10.sp,
@@ -1373,7 +1783,7 @@ private fun MonthlyTrendsCard(trends: List<MonthlyTrend>, meta: InsightMeta? = n
 
 @Composable
 private fun EngagementCard(data: EngagementScore, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Engagement Score", icon = Icons.Default.Speed, accent = TerminalBlue, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "Engagement Score", icon = Icons.Default.Speed, accent = insightAccentForTitle("Engagement Score"), meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Firebase-style engagement metrics (7d)",
             fontSize = 10.sp,
@@ -1492,7 +1902,7 @@ private fun RetentionBadge(label: String, active: Boolean) {
 
 @Composable
 private fun PrivacyRadarCard(entries: List<PrivacyRadarEntry>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Privacy Radar", icon = Icons.Default.Shield, accent = TerminalRed, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "Privacy Radar", icon = Icons.Default.Shield, accent = insightAccentForTitle("Privacy Radar"), meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Per-app privacy invasion score from AppOps audit",
             fontSize = 10.sp,
@@ -1565,7 +1975,7 @@ private fun AccessBadge(label: String, count: Int) {
 
 @Composable
 private fun DataFlowCard(entries: List<DataFlowEntry>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Data Flow", icon = Icons.Default.SwapVert, accent = TerminalPurple, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "Data Flow", icon = Icons.Default.SwapVert, accent = insightAccentForTitle("Data Flow"), meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Per-app network usage (24h) — flagged if TX/RX > 3x",
             fontSize = 10.sp,
@@ -1655,7 +2065,7 @@ private fun DataFlowCard(entries: List<DataFlowEntry>, meta: InsightMeta? = null
 
 @Composable
 private fun AppCompulsionCard(apps: List<AppCompulsion>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "App Compulsion Index", icon = Icons.Default.Repeat, accent = TerminalAmber, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "App Compulsion Index", icon = Icons.Default.Repeat, accent = insightAccentForTitle("App Compulsion Index"), meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Most-launched apps by frequency (7d logcat)",
             fontSize = 10.sp,
@@ -1723,7 +2133,7 @@ private fun AppCompulsionCard(apps: List<AppCompulsion>, meta: InsightMeta? = nu
 
 @Composable
 private fun DeviceHealthCard(health: DeviceHealth, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Device Health", icon = Icons.Default.Memory, accent = TerminalGreen, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "Device Health", icon = Icons.Default.Memory, accent = insightAccentForTitle("Device Health"), meta = meta, showDiagnostics = showDiagnostics) {
         // RAM gauge
         val hasRamData = health.ramUsedPct > 0.0
         val ramColor = when {
@@ -1838,7 +2248,7 @@ private fun DeviceHealthCard(health: DeviceHealth, meta: InsightMeta? = null, sh
 
 @Composable
 private fun IdentityEntropyCard(entropy: IdentityEntropy, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Identity Entropy", icon = Icons.Default.Fingerprint, accent = TerminalPurple, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "Identity Entropy", icon = Icons.Default.Fingerprint, accent = insightAccentForTitle("Identity Entropy"), meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Fingerprint uniqueness quantified in bits of entropy",
             fontSize = 10.sp,
@@ -1950,7 +2360,7 @@ private fun IdentityEntropyCard(entropy: IdentityEntropy, meta: InsightMeta? = n
 
 @Composable
 private fun HomeWorkCard(data: HomeWorkInference, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Home & Work", icon = Icons.Default.Home, accent = TerminalBlue, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "Home & Work", icon = Icons.Default.Home, accent = insightAccentForTitle("Home & Work"), meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Location-based home/work inference from GPS clusters",
             fontSize = 10.sp,
@@ -2035,7 +2445,7 @@ private fun HomeWorkCard(data: HomeWorkInference, meta: InsightMeta? = null, sho
 
 @Composable
 private fun CircadianCard(data: CircadianProfile, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Circadian Rhythm", icon = Icons.Default.WbSunny, accent = TerminalAmber, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "Circadian Rhythm", icon = Icons.Default.WbSunny, accent = insightAccentForTitle("Circadian Rhythm"), meta = meta, showDiagnostics = showDiagnostics) {
         val chronoLabel = when (data.chronotype) {
             "early_bird" -> "Early Bird"
             "night_owl" -> "Night Owl"
@@ -2121,7 +2531,7 @@ private fun CircadianCard(data: CircadianProfile, meta: InsightMeta? = null, sho
 
 @Composable
 private fun RoutineCard(data: RoutinePredictability, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Routine Predictability", icon = Icons.Default.Schedule, accent = TerminalGreen, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "Routine Predictability", icon = Icons.Default.Schedule, accent = insightAccentForTitle("Routine Predictability"), meta = meta, showDiagnostics = showDiagnostics) {
         val pctScore = (data.overallScore * 100).toInt()
         val routineLabel = when {
             pctScore >= 80 -> "Clockwork"
@@ -2201,7 +2611,7 @@ private fun RoutineCard(data: RoutinePredictability, meta: InsightMeta? = null, 
 
 @Composable
 private fun SocialPressureCard(entries: List<SocialPressureEntry>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Social Pressure", icon = Icons.Default.Notifications, accent = TerminalRed, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "Social Pressure", icon = Icons.Default.Notifications, accent = insightAccentForTitle("Social Pressure"), meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Apps that trigger the fastest phone pickups",
             fontSize = 10.sp,
@@ -2266,7 +2676,7 @@ private fun SocialPressureCard(entries: List<SocialPressureEntry>, meta: Insight
 
 @Composable
 private fun AppPortfolioCard(data: AppPortfolioProfile, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "App Portfolio", icon = Icons.Default.Apps, accent = TerminalPurple, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "App Portfolio", icon = Icons.Default.Apps, accent = insightAccentForTitle("App Portfolio"), meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Installed app analysis and demographic inference",
             fontSize = 10.sp,
@@ -2348,7 +2758,7 @@ private fun AppPortfolioCard(data: AppPortfolioProfile, meta: InsightMeta? = nul
 
 @Composable
 private fun ChargingCard(data: ChargingBehavior, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Charging Behavior", icon = Icons.Default.BatteryChargingFull, accent = TerminalGreen, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "Charging Behavior", icon = Icons.Default.BatteryChargingFull, accent = insightAccentForTitle("Charging Behavior"), meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Battery charging patterns and habits",
             fontSize = 10.sp,
@@ -2423,7 +2833,7 @@ private fun ChargingCard(data: ChargingBehavior, meta: InsightMeta? = null, show
 
 @Composable
 private fun WiFiCard(data: WiFiFootprint, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "WiFi Footprint", icon = Icons.Default.Wifi, accent = TerminalBlue, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "WiFi Footprint", icon = Icons.Default.Wifi, accent = insightAccentForTitle("WiFi Footprint"), meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Network mobility and location inference via WiFi",
             fontSize = 10.sp,
@@ -2521,7 +2931,7 @@ private fun WiFiCard(data: WiFiFootprint, meta: InsightMeta? = null, showDiagnos
 
 @Composable
 private fun FragmentationCard(data: SessionFragmentation, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Session Fragmentation", icon = Icons.Default.DataUsage, accent = TerminalAmber, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "Session Fragmentation", icon = Icons.Default.DataUsage, accent = insightAccentForTitle("Session Fragmentation"), meta = meta, showDiagnostics = showDiagnostics) {
         val attentionLabel = when {
             data.attentionScore >= 0.8 -> "Deep focus"
             data.attentionScore >= 0.6 -> "Moderate focus"
@@ -2605,7 +3015,7 @@ private fun FragmentationCard(data: SessionFragmentation, meta: InsightMeta? = n
 
 @Composable
 private fun DwellTimeCard(entries: List<DwellTimeEntry>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Dwell Times", icon = Icons.Default.Place, accent = TerminalPurple, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "Dwell Times", icon = Icons.Default.Place, accent = insightAccentForTitle("Dwell Times"), meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Time spent at each location cluster",
             fontSize = 10.sp,
@@ -2691,7 +3101,7 @@ private fun DwellTimeCard(entries: List<DwellTimeEntry>, meta: InsightMeta? = nu
 
 @Composable
 private fun WeekdayWeekendCard(data: WeekdayWeekendDelta, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Weekday vs Weekend", icon = Icons.Default.CalendarMonth, accent = TerminalBlue, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "Weekday vs Weekend", icon = Icons.Default.CalendarMonth, accent = insightAccentForTitle("Weekday vs Weekend"), meta = meta, showDiagnostics = showDiagnostics) {
         val balanceLabel = when {
             data.balanceScore >= 0.8 -> "Very different"
             data.balanceScore >= 0.5 -> "Noticeably different"
@@ -2769,7 +3179,7 @@ private fun WeekdayWeekendCard(data: WeekdayWeekendDelta, meta: InsightMeta? = n
 
 @Composable
 private fun IncomeCard(data: IncomeInference, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Income Inference", icon = Icons.Default.AttachMoney, accent = TerminalAmber, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "Income Inference", icon = Icons.Default.AttachMoney, accent = insightAccentForTitle("Income Inference"), meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Socioeconomic signals from device + apps + carrier",
             fontSize = 10.sp,
@@ -2837,7 +3247,7 @@ private fun IncomeCard(data: IncomeInference, meta: InsightMeta? = null, showDia
 
 @Composable
 private fun CommuteCard(data: CommutePattern, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Commute Pattern", icon = Icons.Default.DirectionsCar, accent = TerminalBlue, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "Commute Pattern", icon = Icons.Default.DirectionsCar, accent = insightAccentForTitle("Commute Pattern"), meta = meta, showDiagnostics = showDiagnostics) {
         Text(
             "Daily commute inference from location transitions",
             fontSize = 10.sp,
@@ -2937,15 +3347,6 @@ private fun InsightCardShell(
                     Icon(icon, null, tint = accent, modifier = Modifier.size(18.dp))
                 }
                 Spacer(Modifier.width(10.dp))
-                IconButton(onClick = { collapsed = !collapsed }, modifier = Modifier.size(28.dp)) {
-                    Icon(
-                        if (collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
-                        if (collapsed) "Expand $title" else "Collapse $title",
-                        tint = DimGray,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-                Spacer(Modifier.width(6.dp))
                 Text(
                     title,
                     style = MaterialTheme.typography.titleMedium,
@@ -3010,6 +3411,15 @@ private fun InsightCardShell(
                         }
                         ConfidenceTier.HIGH -> { /* no badge for high confidence */ }
                     }
+                }
+                Spacer(Modifier.width(4.dp))
+                IconButton(onClick = { collapsed = !collapsed }, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        if (collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                        if (collapsed) "Expand $title" else "Collapse $title",
+                        tint = DimGray,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
             if (!collapsed) {
@@ -3106,179 +3516,183 @@ private fun EducationalInfoPanel(
 
 private fun educationalInfoForTitle(title: String): String = when (title) {
     "Today" ->
-        "Shows the current collection baseline: volume of data, unlock count, screen time, step delta, battery change, and active collectors. Trackers use the same daily totals to estimate engagement level, device dependence, mobility, and whether a device is currently a rich source of fresh behavior data."
+        "This card mirrors your daily device footprint: every unlock, every minute of screen time, every step, every percent of battery burned. Trackers reflect on these same totals to gauge engagement, estimate mobility, and decide whether your device is worth harvesting right now."
 
     "Sleep" ->
-        "Shows the last 72 hours as a timeline. Likely sleep blocks start with long phone inactivity, then become more confident when ambient light is low and ambient sound or speech activity is quiet. It is still an inference, not sleep physiology. Profilers use this kind of signal to estimate bedtime, wake time, shift work, insomnia patterns, and when a person is most reachable."
+        "MirrorTrack reflects your likely sleep windows by watching for long phone silence, then strengthening confidence when ambient light is dark and ambient sound is quiet. This is still an inference, not medical data. But profilers use the same reflection of inactivity to estimate bedtime, wake time, shift work, insomnia, and the hours when you are least able to resist a notification."
 
     "App Attention (7d)" ->
-        "Ranks apps by foreground time over the last week and compares them with an earlier baseline. Long foreground time suggests attention, interest, dependency, or task focus. Profilers use this to infer entertainment habits, work tools, shopping intent, news interest, and changes in routine."
+        "This card mirrors which apps actually held your gaze over the last week, ranked by foreground time and compared against your prior baseline. The reflection reveals what profilers already see: entertainment habits, work tools, shopping interest, news consumption, and shifts in routine that signal opportunity for targeted ads."
 
     "Anomaly Feed" ->
-        "Flags behavior that deviates from the recent baseline, such as unusual unlock volume, late activity, or battery drain. Anomalies are useful because sudden changes often reveal travel, stress, schedule disruption, illness, outages, or a new app/workflow."
+        "Reflects the moments your behavior broke its own pattern \u2014 unusual unlock spikes, late-night activity, rapid battery drain. These anomalies mirror the exact triggers that surveillance systems flag, because sudden changes often reflect travel, stress, illness, schedule disruption, or a new dependency."
 
     "Location Clusters" ->
-        "Groups repeated GPS fixes into places. High-count clusters often become home, work, school, gym, or shopping locations after time-of-day analysis. Location clusters are among the strongest signals for identity, lifestyle, commute, income context, and routine predictability."
+        "Groups your repeated GPS fixes into places. When you see the clusters, you see a mirror of how profilers would reconstruct your life: home, work, gym, grocery store, school pickup. Location clustering reflects one of the strongest signals for identity, income context, and routine predictability."
 
     "Unlock After Notification" ->
-        "Measures how quickly notifications lead to an unlock. Short latency and high response rates suggest which apps can interrupt you and when. Engagement systems use this to rank notification effectiveness, urgency, habit strength, and social pressure."
+        "Reflects how quickly each app's notifications pull you back to your phone. Short latency and high response rates mirror the metrics engagement systems use to rank notification effectiveness, measure urgency, and gauge how reflexively you respond to each app's pull."
 
     "Fingerprint Stability" ->
-        "Tracks device identity fields and when they change. Stable fields are useful for recognizing the same device over time; changes can indicate updates, resets, spoofing, device migration, or privacy interventions. Fingerprinting systems combine many ordinary fields to make a device recognizable."
+        "Mirrors which device identity fields stay fixed and which ones shift. Stable fields reflect a trackable device; changes can reflect updates, resets, or deliberate privacy steps. Fingerprinting systems combine dozens of ordinary-looking fields to build a mirror image of your device that persists across apps, networks, and time."
 
     "Monthly Trends" ->
-        "Compares behavior across months: data volume, daily unlocks, screen time, and steps. Long-range trends show whether attention, mobility, and collection coverage are rising or falling. These shifts are often more useful than a single day because they reveal durable lifestyle changes."
+        "Reflects your behavior across calendar months \u2014 unlocks, screen time, steps, data volume. These long-range trends mirror durable lifestyle shifts that daily snapshots miss: a new job, a move, a habit change, or a slow drift toward more (or less) device dependence."
 
     "Engagement Score" ->
-        "Summarizes daily and weekly activity into stickiness: active days, sessions per day, session duration, and retention flags. Product analytics systems use this to decide whether someone is casual, habitual, at risk of churn, or highly engaged. A high score usually means frequent, repeated, consistent phone interaction. That can reveal habit strength, dependency patterns, work rhythm, or when someone is reliably reachable."
+        "Mirrors the engagement scoring used by Firebase, Facebook Analytics, and ad-tech SDKs.\n\n" +
+        "\u2022 Sessions \u2014 total distinct phone usage sessions in the last 7 days. A session starts at unlock and ends after inactivity. High counts reflect habit strength or compulsive checking.\n\n" +
+        "\u2022 Frequency \u2014 average sessions per day (e.g. \"4.2/d\" means about 4 pickups daily). Profilers use this reflection to classify you as dormant, casual, regular, or power-level.\n\n" +
+        "\u2022 Avg length \u2014 mean duration of each session. Short sessions reflect quick checks (notifications, social feeds); long ones reflect deep engagement (work, video, reading).\n\n" +
+        "Numbers turn red when they fall below the engagement thresholds that analytics systems consider \"at risk of churn\" \u2014 the same thresholds that trigger re-engagement push notifications, special offers, or algorithmic content boosts designed to pull you back."
 
     "Privacy Radar" ->
-        "Scores apps by sensitive access patterns such as camera, microphone, location, and contacts. A high score means an app touches more personal surfaces or does so more often. This mirrors privacy-risk ranking used in app audits and mobile threat analysis."
+        "Reflects which apps reach into your camera, microphone, location, and contacts \u2014 and how often. A high score mirrors the kind of privacy-risk ranking used in corporate app audits and mobile threat analysis. The reflection is not an accusation; it simply shows how deeply each app touches your personal surfaces."
 
     "Data Flow" ->
-        "Shows per-app network send and receive volume. Upload-heavy apps can indicate sync, backups, telemetry, media sharing, or possible data exfiltration. Network-flow analysis helps infer which apps are active even when their UI is not visible."
+        "Mirrors per-app network send and receive volume. Upload-heavy apps can reflect sync activity, telemetry, media sharing, or quiet data exfiltration. This reflection reveals which apps are actively moving your data even when you are not looking at them."
 
     "App Compulsion Index" ->
-        "Looks for repeated launches and short gaps between launches. High launch frequency with small intervals can suggest checking loops, habit strength, boredom, or task switching. Consumer analytics often uses this pattern to measure dependency and compulsion."
+        "Reflects how often you reopen each app and how short the gaps between launches are. Frequent reopens with small gaps mirror the checking-loop pattern that consumer analytics uses to measure dependency and compulsion \u2014 the same signal that tells advertisers which apps already own your attention."
 
     "Device Health" ->
-        "Summarizes memory pressure, process counts, thermal state, uptime, and memory trend when system data is available. If only battery fallback data exists, RAM and process fields are shown as unknown. Device health can explain behavior gaps and reveal whether the phone is under load, hot, or recently restarted."
+        "Mirrors your phone's internal state: memory pressure, process count, thermal status, uptime, and resource trend. If only battery fallback data is available, some fields show as unknown. This reflection helps explain behavior gaps and reveals whether heat, low resources, or a recent restart may be distorting the rest of your behavioral picture."
 
     "Identity Entropy" ->
-        "Estimates how identifying a device fingerprint is by assigning rough entropy to fields like model, hardware, identifiers, and configuration. More entropy means fewer devices look the same. Fingerprinters combine weak fields because the combination can become highly unique."
+        "Reflects how uniquely identifiable your device is by estimating entropy across model, hardware, identifiers, and configuration. Higher entropy means fewer devices mirror yours. Fingerprinters combine many individually weak fields because the combination can reflect a near-unique identity \u2014 your digital silhouette."
 
     "Home & Work" ->
-        "Uses repeated location clusters and time-of-day patterns to infer likely home and work places. Nighttime dwell usually points to home; weekday daytime dwell often points to work. This is one of the standard methods for inferring life structure from raw location trails."
+        "Mirrors the two most revealing places in your life by analyzing repeated location clusters and time-of-day patterns. Nighttime dwell reflects home; weekday daytime dwell reflects work. This is the standard method profilers use to anchor your entire life pattern from raw GPS data."
 
     "Circadian Rhythm" ->
-        "Builds a 24-hour activity profile from unlocks or fallback activity events. Peak and quiet hours reveal chronotype, shift work, and daily availability. Behavioral targeting systems use circadian timing to decide when messages are most likely to get attention."
+        "Reflects your 24-hour activity cycle from unlocks and activity events. Peak and quiet hours mirror your chronotype, shift patterns, and daily availability. Behavioral targeting systems use this same reflection of timing to decide when messages and ads are most likely to catch your attention."
 
     "Routine Predictability" ->
-        "Measures how similar your hourly activity patterns are across days and how much weekday behavior differs from weekend behavior. Predictable routines make future behavior easier to forecast; irregular routines reduce confidence and require more recent data."
+        "Mirrors how repeatable your daily schedule is by comparing hourly activity patterns across days. A predictable routine reflects a life that profilers can forecast without constant fresh observation. An irregular pattern reflects unpredictability \u2014 harder to target, but also harder to hide in a crowd."
 
     "Social Pressure" ->
-        "Connects notifications with subsequent unlocks by app. High notification count plus fast response suggests an app or contact channel has strong pull. This can reveal social obligations, work responsiveness, messaging habits, and vulnerability to interruption."
+        "Reflects the connection between notifications and your subsequent unlocks, app by app. A high notification count paired with fast responses mirrors the pull each app has over your attention. This reflection exposes social obligations, work responsiveness, and which channels successfully demand that you pick up your phone."
 
     "App Portfolio" ->
-        "Classifies installed apps into broad categories and derives demographic or lifestyle hints from the mix. Finance, parenting, fitness, dating, gaming, productivity, and travel apps all create profile signals even if the apps are never opened during collection."
+        "Mirrors the story your installed apps tell about you \u2014 even the ones you never open. Finance, parenting, fitness, dating, gaming, and productivity apps each reflect life-stage and interest signals that profilers harvest without needing to see a single minute of actual usage."
 
     "Charging Behavior" ->
-        "Examines charge starts, depth of discharge, overnight charging, and charge duration. Charging patterns reveal sleep routine, commute constraints, battery anxiety, device age, and whether someone is usually near stable power."
+        "Reflects your charging habits: when you plug in, how low you let the battery drop, whether you charge overnight, and how long each charge lasts. These patterns mirror your sleep routine, commute constraints, battery anxiety, and proximity to stable power sources throughout the day."
 
     "WiFi Footprint" ->
-        "Counts unique WiFi networks, repeated SSIDs, and overnight networks. A stable overnight network can imply home; many networks imply mobility. WiFi history is a strong location proxy even without GPS because networks anchor visits to real places."
+        "Mirrors your movement through the world via the Wi-Fi networks your device has seen. A stable overnight network reflects home; many networks reflect mobility. Wi-Fi history mirrors GPS-quality location data even without GPS enabled, because network names anchor visits to real places."
 
     "Session Fragmentation" ->
-        "Estimates how often attention switches between apps and how long focus stays in one place. High fragmentation suggests multitasking, distraction, or rapid checking. Low fragmentation suggests deeper focus or longer task sessions."
+        "Reflects how chopped-up your attention is during each phone session. High fragmentation mirrors rapid app-switching, distraction, and reflexive checking. Low fragmentation reflects deeper focus or sustained task engagement. This metric mirrors how profilers assess your attention quality."
 
     "Dwell Times" ->
-        "Measures how long the device stays around each location cluster and how often visits recur. Dwell duration helps classify places: home, work, transit, retail, social, or other recurring stops. Time spent is often more revealing than location alone."
+        "Mirrors how long your device stays at each recurring place and how often visits repeat. Dwell duration reflects the difference between anchor locations and pass-through stops. Time spent often reflects more about your life than the location alone."
 
     "Weekday vs Weekend" ->
-        "Compares workweek and weekend behavior: unlocks, screen time, and top apps. Differences reveal work schedule, leisure habits, commuting changes, and whether weekdays or weekends carry more device dependence."
+        "Reflects the contrast between your workweek and weekend behavior: unlocks, screen time, and top apps. The differences mirror whether your life is driven by structured obligations or free time \u2014 and which mode carries more device dependence."
 
     "Income Inference" ->
-        "Combines device tier, carrier signals, and app portfolio hints into a rough socioeconomic profile. This is probabilistic and imperfect, but advertisers often use device price, carrier type, and installed app categories as income proxies."
+        "Mirrors the crude socioeconomic profiling that ad networks perform using device tier, carrier signals, and installed app categories. This reflection is deliberately rough \u2014 the point is to show how easily weak signals are combined into an income guess that shapes the ads, offers, and treatment you receive."
 
     "Commute Pattern" ->
-        "Detects repeated transitions between likely home and work clusters. Departure time, return time, duration, transport mode, and consistency reveal schedule stability and travel constraints. Commute regularity is a strong predictor of future location."
+        "Reflects repeated transitions between your inferred home and work locations. Departure time, return time, trip duration, transport mode, and consistency mirror the schedule regulators and predictors that let profilers know where you will be at any given hour of a workday."
 
     "Voice Context" ->
-        "Summarizes local speech transcription windows into conversation presence, speech density, context labels, and tags. The app discards audio and stores text-derived signals locally. Speech context can help distinguish quiet time, meetings, travel, errands, media playback, and social interaction."
+        "Mirrors what speech patterns reveal about your context \u2014 without retaining raw audio. Conversation density, context labels, and keyword tags reflect whether you are in a meeting, running errands, watching media, or having a personal conversation. All processing is local; the reflection stays on your device."
 
     else ->
-        "Explains what this card infers, which signals support it, and why the pattern is useful for behavioral profiling. Treat every result as probabilistic: stronger data coverage raises confidence, while sparse or stale data should be read cautiously."
+        "This card mirrors a specific behavioral signal and reflects what profilers would see if they had the same data. Treat every result as probabilistic: stronger data coverage raises confidence, while sparse or stale data should be read cautiously."
 }
 
 private fun whyMattersForTitle(title: String): String = when (title) {
     "Today" ->
-        "This kind of daily baseline is enough to flag whether someone was unusually active, offline, sedentary, or generating far more data than normal."
+        "Look in this mirror every day. If a tracker can see whether you were active, idle, sedentary, or generating unusual volumes of data \u2014 so can anyone who buys that data downstream."
 
     "Sleep" ->
-        "Sleep windows reveal routine, fatigue, late nights, overnight disruptions, and the hours when someone is least likely to respond."
+        "Your sleep windows reflect routine, fatigue, late nights, and the hours when you are least defended against notification manipulation. This mirror shows why bedtime is a high-value signal."
 
     "App Attention (7d)" ->
-        "Attention rankings show which apps actually dominate time, which is the basis for habit scoring, ad targeting, and product-retention strategy."
+        "This mirror reflects which apps own your time. That ranking is the foundation for habit scoring, ad targeting, and retention strategy \u2014 and it updates itself every week."
 
     "Anomaly Feed" ->
-        "Outliers matter because sudden changes often point to travel, illness, stress, device trouble, or a break from normal routine."
+        "Breaks in pattern are what make surveillance valuable. This mirror reflects the moments that point to travel, illness, stress, or schedule disruption \u2014 exactly the signals a profiler watches for."
 
     "Location Clusters" ->
-        "Recurring places let an observer map physical life patterns and connect behavior to home, work, errands, or sensitive destinations."
+        "Recurring places mirror the map of your physical life. Once a profiler can reflect your regular locations, they can connect behavior to home, work, errands, and sensitive destinations."
 
     "Unlock After Notification" ->
-        "Fast post-notification unlocks reveal which apps can reliably pull attention back and when those interruptions succeed."
+        "This mirror reflects how quickly each app can pull you back. Fast post-notification unlocks reveal which apps have trained your reflexes \u2014 and when those interruptions reliably succeed."
 
     "Fingerprint Stability" ->
-        "Stable identity fields make long-term device recognition easier, while changes help detect resets, upgrades, or privacy countermeasures."
+        "Stable identity fields mirror a device that is easy to follow over time. Changes reflect resets, upgrades, or deliberate privacy steps \u2014 each of which tells its own story."
 
     "Monthly Trends" ->
-        "Long-range shifts are more useful than a single day because they show durable change in attention, mobility, or collection coverage."
+        "Long-range trends mirror durable shifts that daily snapshots miss. This reflection is more valuable than any single day because it reveals whether your attention, mobility, and habits are actually changing."
 
     "Engagement Score" ->
-        "A single engagement number is easy to rank and act on, which is why both growth teams and surveillance systems use it as a shorthand for habit strength."
+        "This is how apps decide you are \"losing interest\" and fire re-engagement campaigns. A single engagement number is trivially easy to rank and act on, which is why growth teams, ad networks, and surveillance systems all converge on the same formula. Red numbers reflect a classification of \"lapsing\" \u2014 the trigger for interventions designed to pull you back."
 
     "Privacy Radar" ->
-        "Sensitive-access patterns help separate ordinary apps from those that reach deeply into private life, which is useful for risk review and threat modeling."
+        "This mirror separates ordinary apps from those that reach deep into your private life. The reflection helps you see which apps deserve scrutiny and which are staying in their lane."
 
     "Data Flow" ->
-        "Network volume can expose background syncing, large uploads, or telemetry even when an app is not visibly in use."
+        "Network volume mirrors what apps are doing behind your back \u2014 background syncing, silent uploads, and telemetry that runs even when you are not looking. The reflection makes invisible data movement visible."
 
     "App Compulsion Index" ->
-        "Repeated reopen behavior is a strong signal of checking loops and which apps have learned how to pull attention back quickly."
+        "This mirror reflects which apps have trained you into checking loops. Repeated reopens with short gaps are the clearest signal that an app has learned how to pull your attention back on demand."
 
     "Device Health" ->
-        "Device condition explains whether heat, low resources, battery state, or a restart may be distorting the rest of the behavioral picture."
+        "This reflection helps you understand whether heat, low resources, battery state, or a restart may be distorting the rest of your behavioral mirror. Device condition matters because it shapes what other cards can accurately show."
 
     "Identity Entropy" ->
-        "The more unique a device looks, the easier it is to recognize and follow across time, apps, and data brokers."
+        "The more unique your device looks, the easier it is to recognize and follow across time, apps, and data brokers. This mirror reflects your digital silhouette \u2014 and how visible it is in a crowd."
 
     "Home & Work" ->
-        "Home and work are anchor points for a life pattern; once they are known, commute, schedule, and unusual absences become much easier to infer."
+        "Home and work are the anchor points of your life pattern. Once this mirror reflects both, commute, schedule, income, and unusual absences all become far easier for a profiler to infer."
 
     "Circadian Rhythm" ->
-        "Activity timing makes it easier to predict when someone sleeps, works, socializes, or is most persuadable by messages and notifications."
+        "This mirror reflects when you sleep, work, and socialize \u2014 the timing profile that behavioral targeting systems use to decide when you are most persuadable by messages and notifications."
 
     "Routine Predictability" ->
-        "Predictable patterns are valuable because future behavior becomes easier to forecast without needing constant fresh observation."
+        "A predictable routine reflects a life that profilers can forecast without constant fresh observation. This mirror shows how much of your future behavior is already written in your past patterns."
 
     "Social Pressure" ->
-        "This shows which channels or apps successfully demand attention, exposing work expectations, relationship dynamics, and interruption pressure."
+        "This mirror reflects which channels and apps successfully demand your attention, exposing work expectations, relationship dynamics, and the interruption pressure each one exerts."
 
     "App Portfolio" ->
-        "Installed apps expose interests and life roles even without active use, which is why app inventories are heavily used for profiling."
+        "Your installed apps reflect interests and life roles even without a single minute of active use. This mirror shows why app inventories are one of the most heavily harvested profile sources."
 
     "Charging Behavior" ->
-        "Charging habits quietly reveal when the phone is idle, near a bed, in a car, at a desk, or under stress from heavy daily use."
+        "Charging habits quietly mirror when your phone is idle, near a bed, in a car, at a desk, or under stress from heavy use. The reflection reveals routine in a way that feels invisible but is surprisingly precise."
 
     "WiFi Footprint" ->
-        "Network history can stand in for location history, making recurring places and movement patterns visible even without GPS."
+        "Your network history mirrors your location history. Recurring SSIDs reflect places as clearly as GPS, making movement patterns visible even when location permissions are off."
 
     "Session Fragmentation" ->
-        "Attention fragmentation helps distinguish focused work from constant checking, which says a lot about distraction load and app-driven interruption."
+        "This mirror reflects the difference between focused work and constant checking. High fragmentation reflects distraction load; low fragmentation reflects sustained attention \u2014 both are valuable signals about how your time is actually spent."
 
     "Dwell Times" ->
-        "Time spent at places is often more revealing than the places themselves because it separates anchors from brief pass-through stops."
+        "How long you stay reflects more than where you go. This mirror separates the anchor locations in your life from the brief pass-through stops, revealing which places actually matter."
 
     "Weekday vs Weekend" ->
-        "Comparing routine days with off days shows whether behavior is driven more by work structure or free time, even when the schedule is nontraditional."
+        "This mirror reflects whether your life is shaped more by structured obligations or free time. The contrast between workweek and weekend behavior reveals schedule dependence even when the pattern is nontraditional."
 
     "Income Inference" ->
-        "Even rough socioeconomic guesses can shape offers, fraud scoring, ad targeting, and which users get treated as more or less valuable."
+        "Even rough socioeconomic reflections shape the ads, offers, fraud scores, and treatment tiers that companies assign to you. This mirror shows how a few weak signals combine into a surprisingly confident income guess."
 
     "Commute Pattern" ->
-        "Commute regularity exposes schedule rigidity, travel burden, and where someone is likely to be at specific times of day."
+        "Your commute pattern mirrors schedule rigidity, travel burden, and predictable presence at specific times. This reflection shows why profilers value regular commuters \u2014 their future location is almost already known."
 
     "Voice Context" ->
-        "Speech-derived context can reveal meetings, errands, family time, and media use that other device signals might miss."
+        "Speech patterns reflect context that other device signals miss: meetings, errands, family time, media use. This mirror processes everything locally and retains only derived signals, but it still shows how much context a microphone can reflect."
 
     else ->
-        "Once a pattern is stable enough to summarize, it can be compared, ranked, predicted, and acted on by whoever has the data."
+        "Once a pattern is stable enough to reflect in a summary, it can be compared, ranked, predicted, and acted on by whoever holds the mirror."
 }
 
 @Composable
 private fun VoiceContextCard(data: VoiceContextInsight, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Voice Context", icon = Icons.Default.Mic, accent = TerminalBlue, meta = meta, showDiagnostics = showDiagnostics) {
+    InsightCardShell(title = "Voice Context", icon = Icons.Default.Mic, accent = insightAccentForTitle("Voice Context"), meta = meta, showDiagnostics = showDiagnostics) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             StatCell(Icons.Default.Mic, "${data.conversationSamples}/${data.samples7d}", "speech windows")
             StatCell(Icons.Default.Speed, "${"%.0f".format(data.avgSpeechDensityWpm)}", "words/min")
@@ -3360,6 +3774,15 @@ private fun formatLargeNumber(n: Long): String {
         n < 1_000_000_000_000 -> "${"%.0f".format(n / 1_000_000_000.0)}B"
         else -> "${"%.0f".format(n / 1_000_000_000_000.0)}T"
     }
+}
+
+private fun formatExactNumber(n: Long): String =
+    NumberFormat.getNumberInstance(Locale.getDefault()).format(n)
+
+private fun formatDatabaseSize(bytes: Long): String {
+    val mb = bytes / (1024.0 * 1024.0)
+    return if (mb >= 1024.0) "${"%.1f".format(mb / 1024.0)} GB"
+    else "${"%.1f".format(mb)} MB"
 }
 
 internal fun relativeTime(epochMs: Long): String {

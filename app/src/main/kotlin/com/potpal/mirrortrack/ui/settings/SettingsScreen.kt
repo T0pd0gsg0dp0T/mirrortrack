@@ -1,16 +1,20 @@
 package com.potpal.mirrortrack.ui.settings
 
+import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Process
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.pm.PackageInfoCompat
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,9 +22,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Security
@@ -50,9 +59,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -65,6 +79,7 @@ import com.potpal.mirrortrack.collectors.Ingestor
 import com.potpal.mirrortrack.scheduling.CollectorHealthTracker
 import com.potpal.mirrortrack.data.DataPointDao
 import com.potpal.mirrortrack.data.DatabaseHolder
+import com.potpal.mirrortrack.export.AnonymizedExportManager
 import com.potpal.mirrortrack.export.ExportManager
 import com.potpal.mirrortrack.export.ImportManager
 import com.potpal.mirrortrack.export.TrackerPayloadGenerator
@@ -98,7 +113,8 @@ class SettingsViewModel @Inject constructor(
     private val databaseHolder: DatabaseHolder,
     private val exportManager: ExportManager,
     private val importManager: ImportManager,
-    private val trackerPayloadGenerator: TrackerPayloadGenerator
+    private val trackerPayloadGenerator: TrackerPayloadGenerator,
+    private val anonymizedExportManager: AnonymizedExportManager
 ) : ViewModel() {
 
     fun getCollectorsByCategory(): Map<Category, List<Collector>> =
@@ -198,6 +214,19 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    private val _anonymizedExportResult = MutableStateFlow<AnonymizedExportManager.ExportResult?>(null)
+    val anonymizedExportResult: StateFlow<AnonymizedExportManager.ExportResult?> = _anonymizedExportResult
+
+    fun exportAnonymized(uri: Uri) {
+        viewModelScope.launch {
+            _anonymizedExportResult.value = anonymizedExportManager.export(uri)
+        }
+    }
+
+    fun clearAnonymizedExportResult() {
+        _anonymizedExportResult.value = null
+    }
+
     private val _importResult = MutableStateFlow<ImportManager.ImportResult?>(null)
     val importResult: StateFlow<ImportManager.ImportResult?> = _importResult
 
@@ -209,6 +238,46 @@ class SettingsViewModel @Inject constructor(
 
     fun clearImportResult() {
         _importResult.value = null
+    }
+
+    fun getPermissionSummary(): PermissionSummaryData {
+        val runtimePermissions = registry.all()
+            .filter { it.accessTier == AccessTier.RUNTIME && it.requiredPermissions.isNotEmpty() }
+            .flatMap { it.requiredPermissions }
+            .distinct()
+
+        val missingRuntimePermissions = runtimePermissions.count { permission ->
+            context.checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED
+        }
+
+        val specialAccessChecks = registry.all()
+            .filter { it.accessTier == AccessTier.SPECIAL_ACCESS }
+            .mapNotNull { collector ->
+                when (collector.id) {
+                    "notification_listener" -> {
+                        NotificationManagerCompat.getEnabledListenerPackages(context)
+                            .contains(context.packageName)
+                    }
+                    "usage_stats" -> {
+                        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager
+                        val mode = appOps?.checkOpNoThrow(
+                            AppOpsManager.OPSTR_GET_USAGE_STATS,
+                            Process.myUid(),
+                            context.packageName
+                        )
+                        mode == AppOpsManager.MODE_ALLOWED
+                    }
+                    else -> null
+                }
+            }
+
+        val missingSpecialAccess = specialAccessChecks.count { granted -> !granted }
+
+        return PermissionSummaryData(
+            trackedCount = runtimePermissions.size + specialAccessChecks.size,
+            missingCount = missingRuntimePermissions + missingSpecialAccess,
+            grantedCount = (runtimePermissions.size - missingRuntimePermissions) + specialAccessChecks.count { it }
+        )
     }
 
     // Self-audit data
@@ -253,6 +322,12 @@ class SettingsViewModel @Inject constructor(
     }
 }
 
+data class PermissionSummaryData(
+    val trackedCount: Int,
+    val missingCount: Int,
+    val grantedCount: Int
+)
+
 data class SelfAuditData(
     val declaredPermissions: List<String>,
     val usedPermissions: List<String>,
@@ -293,6 +368,12 @@ fun SettingsScreen(
         uri?.let { viewModel.generateTrackerPayload(it) }
     }
 
+    val anonymizedExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/x-ndjson")
+    ) { uri ->
+        uri?.let { viewModel.exportAnonymized(it) }
+    }
+
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -300,6 +381,7 @@ fun SettingsScreen(
     }
 
     val importResult by viewModel.importResult.collectAsStateWithLifecycle()
+    val anonymizedExportResult by viewModel.anonymizedExportResult.collectAsStateWithLifecycle()
 
     LazyColumn(
         modifier = Modifier
@@ -325,6 +407,65 @@ fun SettingsScreen(
                     "Settings",
                     style = MaterialTheme.typography.titleLarge
                 )
+            }
+        }
+
+        // Permission status
+        item {
+            val permSummary = remember { viewModel.getPermissionSummary() }
+            val statusColor = when {
+                permSummary.trackedCount == 0 -> Color(0xFF484F58)
+                permSummary.missingCount == 0 -> Color(0xFF3FB950)
+                permSummary.missingCount == 1 -> Color(0xFFD29922)
+                else -> Color(0xFFF85149)
+            }
+            val statusText = when {
+                permSummary.trackedCount == 0 -> "No permissions tracked"
+                permSummary.missingCount == 0 -> "All ${permSummary.grantedCount} tracked permissions granted"
+                else -> "${permSummary.grantedCount} of ${permSummary.trackedCount} permissions granted"
+            }
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = statusColor.copy(alpha = 0.08f))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(statusColor.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Security,
+                            contentDescription = statusText,
+                            tint = statusColor,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            statusText,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = statusColor
+                        )
+                        if (permSummary.missingCount > 0) {
+                            Text(
+                                "${permSummary.missingCount} missing — some insight cards may be limited",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -564,6 +705,24 @@ fun SettingsScreen(
             }
         }
 
+        item {
+            OutlinedButton(
+                onClick = {
+                    val ts = System.currentTimeMillis()
+                    anonymizedExportLauncher.launch("mirrortrack_ai_export_$ts.jsonl")
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Export anonymized for AI analysis")
+            }
+            Text(
+                "JSONL format with PII hashed or redacted. Safe to share with AI tools.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+            )
+        }
+
         // Security section
         item {
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
@@ -670,6 +829,34 @@ fun SettingsScreen(
                         android.os.Process.killProcess(android.os.Process.myPid())
                     }
                 }) { Text("OK") }
+            }
+        )
+    }
+
+    // Anonymized export result dialog
+    if (anonymizedExportResult != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.clearAnonymizedExportResult() },
+            title = {
+                Text(
+                    if (anonymizedExportResult is AnonymizedExportManager.ExportResult.Success)
+                        "Export Complete" else "Export Failed"
+                )
+            },
+            text = {
+                Text(
+                    when (val r = anonymizedExportResult) {
+                        is AnonymizedExportManager.ExportResult.Success ->
+                            "${r.rowCount} data points exported as anonymized JSONL. " +
+                            "GPS is rounded to ~1km, identifiers are hashed, and transcripts are redacted. " +
+                            "Safe to load into AI analysis tools."
+                        is AnonymizedExportManager.ExportResult.Error -> r.message
+                        else -> ""
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.clearAnonymizedExportResult() }) { Text("OK") }
             }
         )
     }

@@ -66,4 +66,7 @@ interface DataPointDao {
 
     @Query("DELETE FROM data_points")
     suspend fun purgeAll()
+
+    @Query("SELECT * FROM data_points WHERE rowId > :afterRowId ORDER BY rowId ASC LIMIT :limit")
+    suspend fun pageAscending(afterRowId: Long = 0, limit: Int = 5000): List<DataPointEntity>
 }

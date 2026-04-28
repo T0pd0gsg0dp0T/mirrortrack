@@ -17,6 +17,7 @@ import com.potpal.mirrortrack.settings.CollectorPreferences
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -161,10 +162,12 @@ data class InsightsState(
     // Collection summary
     val categoryCounts: List<CategoryCount> = emptyList(),
     val totalDataPoints: Long = 0L,
+    val databaseSizeBytes: Long = 0L,
     val trackedPermissionCount: Int = 0,
     val missingPermissionCount: Int = 0,
     // Per-card metadata
     val cardMeta: Map<String, InsightMeta> = emptyMap(),
+    val cardOrder: List<String> = emptyList(),
     // Diagnostics toggle
     val showDiagnostics: Boolean = false
 )
@@ -438,11 +441,28 @@ class InsightsViewModel @Inject constructor(
     private val metaAccumulator = mutableMapOf<String, InsightMeta>()
 
     init {
+        viewModelScope.launch {
+            prefs.getInsightCardOrder().collectLatest { order ->
+                _state.update { it.copy(cardOrder = order) }
+            }
+        }
         refresh()
     }
 
     fun toggleDiagnostics() {
         _state.update { it.copy(showDiagnostics = !it.showDiagnostics) }
+    }
+
+    fun saveInsightCardOrder(order: List<String>) {
+        viewModelScope.launch {
+            prefs.setInsightCardOrder(order)
+        }
+    }
+
+    fun clearInsightCardOrder() {
+        viewModelScope.launch {
+            prefs.clearInsightCardOrder()
+        }
     }
 
     /**
@@ -550,6 +570,11 @@ class InsightsViewModel @Inject constructor(
                 }
             }
             val totalDef = async { dao.count() }
+            val dbSizeDef = async {
+                try {
+                    context.getDatabasePath("mirrortrack.db").length()
+                } catch (_: Exception) { 0L }
+            }
             val permissionSummaryDef = async { computePermissionSummary() }
 
             val todayDef = async { computeToday() }
@@ -636,6 +661,7 @@ class InsightsViewModel @Inject constructor(
                 loading = false,
                 categoryCounts = catCountsDef.await(),
                 totalDataPoints = totalDef.await(),
+                databaseSizeBytes = dbSizeDef.await(),
                 trackedPermissionCount = permissionSummary.trackedCount,
                 missingPermissionCount = permissionSummary.missingCount,
                 today = today,

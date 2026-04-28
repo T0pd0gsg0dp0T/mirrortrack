@@ -87,9 +87,9 @@ fun UnlockScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Spacer(Modifier.weight(1f))
         Icon(
             imageVector = Icons.Default.Lock,
             contentDescription = null,
@@ -229,6 +229,8 @@ fun UnlockScreen(
                 Text(if (isFirstRun) "Create & Unlock" else "Unlock")
             }
         }
+
+        Spacer(Modifier.weight(2f))
     }
 }
 

@@ -117,4 +117,7 @@ private class LazyDataPointDao(private val holder: DatabaseHolder) : DataPointDa
     override suspend fun countSince(sinceMs: Long) = real().countSince(sinceMs)
 
     override suspend fun purgeAll() = real().purgeAll()
+
+    override suspend fun pageAscending(afterRowId: Long, limit: Int) =
+        real().pageAscending(afterRowId, limit)
 }
