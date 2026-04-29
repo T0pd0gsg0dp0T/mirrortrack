@@ -2900,79 +2900,67 @@ class InsightsViewModel @Inject constructor(
     // ── Inference 11: Income/Demographic ─────────────────────────────
 
     private suspend fun computeIncome(): IncomeInference? {
-        val buildData = dao.byCollector("build_info", 100)
+        val buildData = dao.byCollector("build_info", 200)
         if (buildData.isEmpty()) return null
 
         fun latestVal(key: String) = buildData.filter { it.key == key }
             .maxByOrNull { it.timestamp }?.value ?: ""
 
         val manufacturer = latestVal("manufacturer").lowercase()
-        val model = latestVal("model").lowercase()
+        val modelLower = latestVal("model").lowercase()
         val brand = latestVal("brand").lowercase()
 
-        // Device price tier estimation
-        val flagshipBrands = setOf("apple", "samsung", "google", "oneplus", "sony")
-        val budgetBrands = setOf("xiaomi", "redmi", "poco", "realme", "oppo", "vivo", "tecno", "infinix", "itel")
+        val hwData = dao.byCollector("hardware", 50)
+        val totalRamGb = (hwData.filter { it.key == "total_ram_bytes" }
+            .maxByOrNull { it.timestamp }?.value?.toLongOrNull() ?: 0L)
+            .let { it / (1024.0 * 1024.0 * 1024.0) }
+        val refreshRateHz = hwData.filter { it.key == "refresh_rate_hz" }
+            .maxByOrNull { it.timestamp }?.value?.toDoubleOrNull() ?: 60.0
 
-        val flagshipKeywords = listOf("pro", "ultra", "max", "plus", "fold", "flip", "note 2", "s2")
-        val budgetKeywords = listOf("lite", "go", "neo", "a0", "a1", "c1", "c0", "y1", "redmi")
+        val (deviceTier, estimatedPrice) = inferDeviceTier(
+            manufacturer, brand, modelLower, totalRamGb, refreshRateHz
+        )
 
-        val isFlagshipBrand = flagshipBrands.any { brand.contains(it) || manufacturer.contains(it) }
-        val hasFlagshipKeyword = flagshipKeywords.any { model.contains(it) }
-        val hasBudgetKeyword = budgetKeywords.any { model.contains(it) }
-
-        val (deviceTier, estimatedPrice) = when {
-            brand.contains("apple") -> "ultra" to 1200
-            isFlagshipBrand && hasFlagshipKeyword -> "flagship" to 900
-            isFlagshipBrand && !hasBudgetKeyword -> "mid_range" to 500
-            hasBudgetKeyword || budgetBrands.any { brand.contains(it) } -> "budget" to 200
-            else -> "mid_range" to 400
-        }
-
-        // Carrier tier: primary carrier collector, fallback to connectivity for operator name
-        var carrierData = dao.byCollector("carrier", 10)
+        val carrierData = dao.byCollector("carrier", 20)
         var carrierName = carrierData.filter { it.key == "carrier_name" }
             .maxByOrNull { it.timestamp }?.value?.lowercase() ?: ""
+        val simOperator = carrierData.filter { it.key == "sim_operator" }
+            .maxByOrNull { it.timestamp }?.value ?: ""
         if (carrierName.isBlank()) {
             val connData = dao.byCollector("connectivity", 50)
             carrierName = connData.filter { it.key == "operator_name" || it.key == "network_operator" }
                 .maxByOrNull { it.timestamp }?.value?.lowercase() ?: ""
         }
 
-        val premiumCarriers = setOf("verizon", "at&t", "t-mobile", "vodafone", "ee", "o2")
-        val mvnoKeywords = listOf("mint", "visible", "cricket", "boost", "metro", "straight", "tracfone")
+        val carrierTier = classifyCarrier(carrierName, simOperator)
 
-        val carrierTier = when {
-            premiumCarriers.any { carrierName.contains(it) } -> "postpaid"
-            mvnoKeywords.any { carrierName.contains(it) } -> "mvno"
-            carrierName.isBlank() -> "unknown"
-            else -> "prepaid"
-        }
-
-        // App signals
         val appSignals = mutableListOf<String>()
         val appPortfolio = computeAppPortfolio()
         if (appPortfolio != null) {
-            if ((appPortfolio.categories["finance"] ?: 0) >= 2) appSignals.add("has_trading_apps")
+            val financeCount = appPortfolio.categories["finance"] ?: 0
+            if (financeCount >= 4) appSignals.add("multiple_finance_apps")
             if ((appPortfolio.categories["streaming"] ?: 0) >= 3) appSignals.add("multiple_streaming")
             if ((appPortfolio.categories["shopping"] ?: 0) >= 3) appSignals.add("frequent_shopper")
             if ((appPortfolio.categories["food_delivery"] ?: 0) >= 2) appSignals.add("uses_delivery")
         }
 
-        // Overall tier
-        val tierScore = when (deviceTier) {
+        val deviceScore = when (deviceTier) {
             "ultra" -> 4
             "flagship" -> 3
             "mid_range" -> 2
             "budget" -> 1
             else -> 2
-        } + when (carrierTier) {
+        }
+        val carrierScore = when (carrierTier) {
             "postpaid" -> 2
             "prepaid" -> 1
             "mvno" -> 0
             else -> 1
-        } + if (appSignals.contains("has_trading_apps")) 1 else 0 +
-                if (appSignals.contains("multiple_streaming")) 1 else 0
+        }
+        val appScore =
+            (if ("multiple_finance_apps" in appSignals) 1 else 0) +
+            (if ("multiple_streaming" in appSignals) 1 else 0)
+        val tierScore = deviceScore + carrierScore + appScore
 
         val overallTier = when {
             tierScore >= 6 -> "affluent"
@@ -2982,6 +2970,179 @@ class InsightsViewModel @Inject constructor(
         }
 
         return IncomeInference(deviceTier, estimatedPrice, carrierTier, appSignals, overallTier)
+    }
+
+    private fun inferDeviceTier(
+        manufacturer: String,
+        brand: String,
+        modelLower: String,
+        totalRamGb: Double,
+        refreshRateHz: Double
+    ): Pair<String, Int> {
+        // Apple — any modern iPhone is at least flagship-tier
+        if (manufacturer == "apple" || brand == "apple") {
+            return when {
+                "pro max" in modelLower -> "ultra" to 1200
+                "pro" in modelLower || "ultra" in modelLower -> "ultra" to 1100
+                "plus" in modelLower || "max" in modelLower -> "flagship" to 950
+                "se" in modelLower -> "mid_range" to 450
+                "mini" in modelLower -> "flagship" to 700
+                else -> "flagship" to 800
+            }
+        }
+
+        // Samsung — Build.MODEL is the SKU code (SM-G996U etc.), not the marketing name.
+        // Mapping by family character + numeric tier digit:
+        //   SM-F* → Galaxy Z Fold/Flip (ultra)
+        //   SM-G99x / SM-S9xx → Galaxy S series; trailing tier digit picks variant
+        //   SM-N* → Galaxy Note (ultra)
+        //   SM-A* → Galaxy A (mid)
+        //   SM-M* / SM-J* → budget
+        if (manufacturer == "samsung" || brand == "samsung") {
+            return classifySamsung(modelLower, totalRamGb)
+        }
+
+        // Pixel — Build.MODEL is "Pixel 8 Pro" style on Google
+        if (manufacturer == "google" || brand == "google" ||
+            modelLower.startsWith("pixel")) {
+            return when {
+                "fold" in modelLower -> "ultra" to 1700
+                "pro" in modelLower -> "ultra" to 1000
+                Regex("pixel \\d+a").containsMatchIn(modelLower) -> "mid_range" to 500
+                else -> "flagship" to 700
+            }
+        }
+
+        // OnePlus
+        if (manufacturer == "oneplus" || brand == "oneplus") {
+            return when {
+                "pro" in modelLower -> "flagship" to 900
+                "nord" in modelLower -> "mid_range" to 400
+                else -> "flagship" to 700
+            }
+        }
+
+        // Sony Xperia — flagship line
+        if (manufacturer == "sony" || brand == "sony") {
+            return when {
+                "1 " in modelLower || "5 " in modelLower -> "flagship" to 900
+                else -> "mid_range" to 500
+            }
+        }
+
+        // Budget-tilted brands
+        val budgetBrands = setOf(
+            "xiaomi", "redmi", "poco", "realme", "oppo", "vivo",
+            "tecno", "infinix", "itel", "wiko", "blu", "zte"
+        )
+        if (budgetBrands.any { brand.contains(it) || manufacturer.contains(it) }) {
+            val proLine = "ultra" in modelLower || "find x" in modelLower ||
+                "13 pro" in modelLower || "12 pro" in modelLower
+            return when {
+                proLine -> "flagship" to 800
+                "lite" in modelLower || "neo" in modelLower -> "budget" to 200
+                else -> {
+                    val byRam = ramBasedTier(totalRamGb, refreshRateHz)
+                    // Budget-leaning brands rarely cross into "ultra" without an explicit pro/ultra tag
+                    if (byRam.first == "ultra") "flagship" to 600 else byRam
+                }
+            }
+        }
+
+        return ramBasedTier(totalRamGb, refreshRateHz)
+    }
+
+    private fun classifySamsung(modelLower: String, totalRamGb: Double): Pair<String, Int> {
+        // Galaxy Z Fold / Flip (SM-Fxxx)
+        Regex("^sm-f9\\d{2}").find(modelLower)?.let { return "ultra" to 1700 }
+        Regex("^sm-f7\\d{2}").find(modelLower)?.let { return "ultra" to 1000 }
+
+        // Galaxy Note (SM-Nxxx) — Note 10/20 era; all flagship-ultra
+        if (Regex("^sm-n9\\d{2}").containsMatchIn(modelLower)) {
+            return if (modelLower.contains("u") || modelLower.contains("8")) "ultra" to 1100
+                else "flagship" to 950
+        }
+
+        // Galaxy S series — SM-G99x (S20–S21) and SM-S9xx (S22–S24+)
+        // The 3rd numeric digit indicates variant: 1=base, 6/7=plus, 8/9=ultra.
+        val sSeriesMatch = Regex("^sm-[gs](\\d)(\\d)(\\d)\\d?[a-z]?").find(modelLower)
+        if (sSeriesMatch != null) {
+            val (d1, _, d3) = sSeriesMatch.destructured
+            // Restrict to S-line generations: SM-G99x or SM-S9xx, SM-S92x–SM-S95x as future-proofing.
+            val isSLine = (d1 == "9")
+            if (isSLine) {
+                return when (d3) {
+                    "8", "9" -> "ultra" to 1200       // S Ultra
+                    "6", "7" -> "flagship" to 1000    // S+
+                    else -> "flagship" to 800          // base S
+                }
+            }
+        }
+
+        // Galaxy A series — SM-Axx*
+        Regex("^sm-a(\\d)(\\d)").find(modelLower)?.let { m ->
+            val tens = m.groupValues[1].toIntOrNull() ?: 0
+            return when {
+                tens >= 7 -> "mid_range" to 550   // A7x flagship-killer line
+                tens >= 5 -> "mid_range" to 400   // A5x
+                tens >= 3 -> "mid_range" to 300   // A3x
+                else -> "budget" to 200            // A0x–A2x
+            }
+        }
+
+        // Galaxy M / J series — budget
+        if (Regex("^sm-[mj]\\d").containsMatchIn(modelLower)) return "budget" to 200
+
+        // Tablets (SM-T / SM-X) and unknown — fall back to RAM
+        return ramBasedTier(totalRamGb, 60.0)
+    }
+
+    private fun ramBasedTier(totalRamGb: Double, refreshRateHz: Double): Pair<String, Int> {
+        val highRefresh = refreshRateHz >= 90.0
+        return when {
+            totalRamGb >= 11.0 -> "ultra" to 1100
+            totalRamGb >= 7.0 && highRefresh -> "flagship" to 800
+            totalRamGb >= 7.0 -> "flagship" to 700
+            totalRamGb >= 5.0 -> "mid_range" to 400
+            totalRamGb in 0.01..4.99 -> "budget" to 200
+            else -> "mid_range" to 400
+        }
+    }
+
+    private fun classifyCarrier(carrierName: String, simOperator: String): String {
+        if (carrierName.isBlank()) return "unknown"
+
+        // VoIP / over-the-top carriers — treat as MVNO-equivalent (free / data-only).
+        val voipOverlays = listOf("textnow", "textfree", "google fi", "googlefi", "freedompop")
+        if (voipOverlays.any { carrierName.contains(it) }) return "mvno"
+
+        // MVNO / prepaid-only brands
+        val mvnos = listOf(
+            "mint", "visible", "cricket", "boost", "metro", "metropcs",
+            "straight talk", "straighttalk", "tracfone", "consumer cellular",
+            "us mobile", "h2o", "ting", "republic", "red pocket", "page plus",
+            "simple mobile", "lyca", "lycamobile", "ultra mobile", "tello"
+        )
+        if (mvnos.any { carrierName.contains(it) }) return "mvno"
+
+        // Premium / postpaid majors (US + select EU)
+        val postpaid = listOf(
+            "verizon", "at&t", "att ", "t-mobile", "tmobile",
+            "vodafone", "ee ", "o2", "telus", "rogers", "bell",
+            "orange", "deutsche telekom", "swisscom"
+        )
+        if (postpaid.any { carrierName.contains(it) }) return "postpaid"
+
+        // SIM operator code fallback for the major US networks (310-xxx)
+        // Useful when the visible network name is a VoIP overlay but the SIM is still a real carrier.
+        when (simOperator) {
+            "310410", "310070", "310170", "310280", "310380", "310560", "310680" -> return "postpaid" // AT&T
+            "311480", "310004", "310010", "310012" -> return "postpaid" // Verizon
+            "310260", "310160", "310240", "310490", "310660" -> return "postpaid" // T-Mobile
+            else -> {}
+        }
+
+        return "prepaid"
     }
 
     // ── Inference 12: Commute Detection ──────────────────────────────
