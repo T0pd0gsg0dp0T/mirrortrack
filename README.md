@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/MirrorTrackLogo.png" alt="MirrorTrack" width="220" />
+</p>
+
 # MirrorTrack
 
 **See your own data the way trackers do.**

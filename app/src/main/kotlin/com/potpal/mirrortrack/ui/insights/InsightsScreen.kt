@@ -2,6 +2,7 @@ package com.potpal.mirrortrack.ui.insights
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -435,10 +436,9 @@ fun InsightsScreen(
                 TopAppBar(
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_launcher_foreground),
+                            Image(
+                                painter = painterResource(R.mipmap.ic_launcher_foreground),
                                 contentDescription = "MirrorTrack",
-                                tint = Color.Unspecified,
                                 modifier = Modifier.size(32.dp)
                             )
                             Spacer(Modifier.width(4.dp))
