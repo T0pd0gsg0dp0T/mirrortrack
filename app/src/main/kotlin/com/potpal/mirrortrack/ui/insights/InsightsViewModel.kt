@@ -3338,22 +3338,28 @@ class InsightsViewModel @Inject constructor(
 
         val fourteenDaysAgo = System.currentTimeMillis() - 14 * 86_400_000L
         val locPoints = dao.byCollectorSince("location", fourteenDaysAgo)
-        val latByTs = locPoints.filter { it.key == "lat" }.associateBy { it.timestamp }
-        val lonByTs = locPoints.filter { it.key == "lon" }.associateBy { it.timestamp }
+        val latPoints = locPoints.filter { it.key == "lat" }
+        val lonPoints = locPoints.filter { it.key == "lon" }
 
+        // Pair lat/lon with ±5s tolerance. Matches computeHomeWork() — exact-
+        // timestamp pairing dropped fixes when lat and lon were emitted as
+        // separate DataPoints with millisecond skew.
         data class Fix(val lat: Double, val lon: Double, val ts: Long)
-        val fixes = latByTs.mapNotNull { (ts, latRow) ->
-            val lonRow = lonByTs[ts] ?: return@mapNotNull null
-            val latVal = latRow.value.toDoubleOrNull() ?: return@mapNotNull null
-            val lonVal = lonRow.value.toDoubleOrNull() ?: return@mapNotNull null
-            Fix(latVal, lonVal, ts)
-        }.sortedBy { it.ts }
+        val fixes = mutableListOf<Fix>()
+        for (lat in latPoints) {
+            val latVal = lat.value.toDoubleOrNull() ?: continue
+            val lon = lonPoints.minByOrNull { kotlin.math.abs(it.timestamp - lat.timestamp) } ?: continue
+            val lonVal = lon.value.toDoubleOrNull() ?: continue
+            if (kotlin.math.abs(lon.timestamp - lat.timestamp) < 5000) {
+                fixes.add(Fix(latVal, lonVal, lat.timestamp))
+            }
+        }
+        fixes.sortBy { it.ts }
 
         if (fixes.size < 10) return CommutePattern(false, 0.0, 0.0, 0.0, "unknown", 0.0)
 
-        // Tag each fix by proximity to home/work centroids. 250m radius is generous
-        // enough to cover GPS jitter without bleeding between distinct places at
-        // typical urban density.
+        // Tag each fix by proximity to home/work centroids. 250m radius absorbs
+        // GPS jitter without bleeding between distinct places at urban density.
         val placeRadiusKm = 0.25
         fun place(f: Fix): String = when {
             haversineKm(f.lat, f.lon, home.lat, home.lon) <= placeRadiusKm -> "H"
@@ -3361,63 +3367,112 @@ class InsightsViewModel @Inject constructor(
             else -> "O"
         }
 
-        // Walk fixes chronologically. A commute leg is the gap between leaving one
-        // anchor and arriving at the other. We track the last fix observed at each
-        // anchor; when we then see a fix at the other anchor (within 4 hours), that
-        // is a leg.
+        // State-machine leg detection.
+        //   depart = first fix that crossed *out* of the anchor radius
+        //   arrive = first fix that crossed *into* the other anchor radius
+        // Using the last in-anchor fix (as the previous implementation did)
+        // overestimates duration, because GPS sampling at home/work continues
+        // long after the user has stopped moving. That bleeds idle time into
+        // the leg and biases the speed→transport-mode classification toward
+        // "walking".
         data class Leg(val fromHome: Boolean, val departTs: Long, val arriveTs: Long)
         val legs = mutableListOf<Leg>()
-        var lastHomeTs: Long? = null
-        var lastWorkTs: Long? = null
         val maxCommuteMs = 4 * 3_600_000L
         val minCommuteMs = 2 * 60_000L
 
+        var prevPlace: String? = null
+        var lastHomeFix: Long? = null
+        var lastWorkFix: Long? = null
+        var leavingHomeAt: Long? = null  // first non-H fix after an H sequence
+        var leavingWorkAt: Long? = null  // first non-W fix after a W sequence
+
         for (f in fixes) {
-            when (place(f)) {
+            val p = place(f)
+            when (p) {
                 "H" -> {
-                    val depW = lastWorkTs
-                    if (depW != null && f.ts - depW in minCommuteMs..maxCommuteMs) {
-                        legs.add(Leg(fromHome = false, departTs = depW, arriveTs = f.ts))
-                        lastWorkTs = null
+                    val depWork = leavingWorkAt ?: if (prevPlace == "W") lastWorkFix else null
+                    if (depWork != null && f.ts - depWork in minCommuteMs..maxCommuteMs) {
+                        legs.add(Leg(fromHome = false, departTs = depWork, arriveTs = f.ts))
                     }
-                    lastHomeTs = f.ts
+                    // Reset both: arriving home invalidates any pending outbound
+                    // attempt (e.g., short errand that returned), and closes any
+                    // pending inbound regardless of leg validity.
+                    leavingHomeAt = null
+                    leavingWorkAt = null
+                    lastHomeFix = f.ts
                 }
                 "W" -> {
-                    val depH = lastHomeTs
-                    if (depH != null && f.ts - depH in minCommuteMs..maxCommuteMs) {
-                        legs.add(Leg(fromHome = true, departTs = depH, arriveTs = f.ts))
-                        lastHomeTs = null
+                    val depHome = leavingHomeAt ?: if (prevPlace == "H") lastHomeFix else null
+                    if (depHome != null && f.ts - depHome in minCommuteMs..maxCommuteMs) {
+                        legs.add(Leg(fromHome = true, departTs = depHome, arriveTs = f.ts))
                     }
-                    lastWorkTs = f.ts
+                    leavingHomeAt = null
+                    leavingWorkAt = null
+                    lastWorkFix = f.ts
                 }
-                // "O": in transit / elsewhere, don't update anchor timestamps
+                "O" -> {
+                    if (prevPlace == "H" && leavingHomeAt == null) leavingHomeAt = f.ts
+                    if (prevPlace == "W" && leavingWorkAt == null) leavingWorkAt = f.ts
+                }
             }
+            prevPlace = p
         }
 
-        if (legs.size < 2) return CommutePattern(false, 0.0, 0.0, 0.0, "unknown", 0.0)
+        // ≥3 legs (≈1.5 round-trips) before we claim a "pattern" exists. With
+        // only 1–2 legs the depart/return averages are essentially single
+        // observations and the consistency score is meaningless.
+        if (legs.size < 3) return CommutePattern(false, 0.0, 0.0, 0.0, "unknown", 0.0)
 
         val outbound = legs.filter { it.fromHome }
         val inbound = legs.filter { !it.fromHome }
 
         val avgDepartHour = (if (outbound.isNotEmpty()) outbound else legs)
             .map { hourOfDay(it.departTs) }.average()
+        // "Return" in the UI means *arriving home*, not *leaving work*.
+        // Previously this used departTs of inbound legs (= leave-work hour).
         val avgReturnHour = (if (inbound.isNotEmpty()) inbound else legs)
-            .map { hourOfDay(it.departTs) }.average()
+            .map { hourOfDay(it.arriveTs) }.average()
 
         val avgDuration = legs.map { (it.arriveTs - it.departTs) / 60_000.0 }.average()
 
-        val distKm = homeWork.commuteDistanceKm ?: haversineKm(home.lat, home.lon, work.lat, work.lon)
-        val avgSpeedKmh = if (avgDuration > 0) distKm / (avgDuration / 60.0) else 0.0
+        // Speed: prefer summed haversine of intermediate fixes (approximates
+        // road distance). Fall back to straight-line if fixes were too sparse
+        // during the leg. Path can never be shorter than straight-line, so
+        // floor by it.
+        fun pathKm(start: Long, end: Long): Double {
+            val seg = fixes.filter { it.ts in start..end }
+            if (seg.size < 2) return 0.0
+            var total = 0.0
+            for (i in 1 until seg.size) {
+                total += haversineKm(seg[i - 1].lat, seg[i - 1].lon, seg[i].lat, seg[i].lon)
+            }
+            return total
+        }
+        val straightKm = haversineKm(home.lat, home.lon, work.lat, work.lon)
+        val avgPathKm = legs.map { pathKm(it.departTs, it.arriveTs) }
+            .filter { it > 0 }
+            .takeIf { it.isNotEmpty() }
+            ?.average()
+            ?: straightKm
+        val effectiveDistKm = maxOf(avgPathKm, straightKm)
+
+        val avgSpeedKmh = if (avgDuration > 0) effectiveDistKm / (avgDuration / 60.0) else 0.0
         val transportMode = when {
             avgSpeedKmh < 6 -> "walking"
             avgSpeedKmh < 25 -> "transit"
             else -> "driving"
         }
 
+        // Consistency: linear in stdDev of departure hours, scaled so that
+        //   stdDev = 0     → 1.0   (perfect)
+        //   stdDev = 30min → 0.75
+        //   stdDev = 1 h   → 0.5
+        //   stdDev ≥ 2 h   → 0.0
+        // The previous 1/(1+σ) form gave only 0.67 for ±30 min, which is
+        // already a very consistent commute.
         val departHours = outbound.map { hourOfDay(it.departTs) }
-        val consistency = if (departHours.size >= 3) {
-            (1.0 / (1.0 + stdDev(departHours))).coerceIn(0.0, 1.0)
-        } else 0.5
+        val devHours = if (departHours.size >= 3) stdDev(departHours) else 1.0
+        val consistency = (1.0 - (devHours / 2.0)).coerceIn(0.0, 1.0)
 
         return CommutePattern(
             detected = true,
