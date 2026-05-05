@@ -10,6 +10,14 @@
 .externalNativeBuild
 .cxx
 local.properties
+keystore.properties
+*.jks
+*.keystore
+keystores/
+
+# Local agent/tool scratch files
+.claude/*.lock
+.codex
 
 # Kotlin
 *.kotlin_metadata

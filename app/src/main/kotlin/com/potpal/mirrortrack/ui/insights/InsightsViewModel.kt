@@ -108,7 +108,18 @@ object InsightDependencyGraph {
         CardDeps("Weekday/Weekend", listOf("screen_state", "usage_stats"), listOf("app_lifecycle")),
         CardDeps("Income", listOf("build_info", "carrier", "installed_apps"), listOf("connectivity", "usage_stats", "logcat")),
         CardDeps("Commute", listOf("location"), emptyList()),
-        CardDeps("Voice Context", listOf("voice_transcription"), emptyList())
+        CardDeps("Voice Context", listOf("voice_transcription"), emptyList()),
+        CardDeps("Travel Profile", listOf("carrier", "location"), listOf("public_ip", "media_exif")),
+        CardDeps("Social Graph", listOf("contacts"), listOf("notification_listener", "calendar", "call_log", "sms")),
+        CardDeps("Activity Profile", listOf("activity_recognition"), emptyList()),
+        CardDeps("Heart Rate", listOf("body_sensors"), emptyList()),
+        CardDeps("Bluetooth Ecosystem", listOf("bluetooth"), emptyList()),
+        CardDeps("Calendar Density", listOf("calendar"), emptyList()),
+        CardDeps("Photo Activity", listOf("media_exif"), emptyList()),
+        CardDeps("Notification Heatmap", listOf("notification_listener"), emptyList()),
+        CardDeps("Integrity Trust", listOf("integrity"), emptyList()),
+        CardDeps("Spending Pulse", listOf("sms", "notification_listener"), listOf("logcat")),
+        CardDeps("Communication Depth", listOf("call_log", "sms"), listOf("contacts"))
     )
 
     /** Returns how many insight cards this collector feeds (primary + fallback). */
@@ -159,6 +170,18 @@ data class InsightsState(
     val income: IncomeInference? = null,
     val commute: CommutePattern? = null,
     val voiceContext: VoiceContextInsight? = null,
+    // New (2026-04 expansion)
+    val travelProfile: TravelProfile? = null,
+    val socialGraph: SocialGraphProfile? = null,
+    val activityProfile: ActivityProfile? = null,
+    val heartRate: HeartRateProfile? = null,
+    val bluetoothEcosystem: BluetoothEcosystem? = null,
+    val calendarDensity: CalendarDensity? = null,
+    val photoActivity: PhotoActivity? = null,
+    val notificationStress: NotificationStress? = null,
+    val integrityTrust: IntegrityTrust? = null,
+    val spendingPulse: SpendingPulse? = null,
+    val communicationDepth: CommunicationDepth? = null,
     // Collection summary
     val categoryCounts: List<CategoryCount> = emptyList(),
     val totalDataPoints: Long = 0L,
@@ -422,6 +445,120 @@ data class VoiceContextInsight(
     val latestTranscript: String?
 )
 
+data class TravelProfile(
+    val countriesSeen30d: List<String>,            // ISO codes from carrier
+    val isCurrentlyRoaming: Boolean,
+    val publicIpChanges7d: Int,                    // proxy for network shifts
+    val gpsClustersFarFromHome: Int,               // count of clusters > 50 km from home cluster
+    val medianTripRadiusKm: Double,                // median distance from home of >50 km clusters
+    val photoLocations30d: Int,                    // distinct rounded EXIF GPS spots
+    val travelScore: Double                        // 0.0 = stationary, 1.0 = constantly moving
+)
+
+data class SocialGraphProfile(
+    val hashedContacts: Long,
+    val uniqueNotificationSenders7d: Int,
+    val uniqueCallCounterparts30d: Int,
+    val uniqueSmsSenders30d: Int,
+    val calendarAttendeesPerEventAvg: Double,
+    val totalConnections: Int,                     // sum of distinct identifiers
+    val socialBreadth: String                      // "isolated", "small", "moderate", "broad"
+)
+
+data class ActivityProfile(
+    val sampleCount: Int,
+    val percentStill: Double,
+    val percentWalking: Double,
+    val percentRunning: Double,
+    val percentVehicle: Double,
+    val percentBicycle: Double,
+    val avgConfidence: Double,
+    val movementIndex: Double                      // 0.0 sedentary → 1.0 highly active
+)
+
+data class HeartRateProfile(
+    val sampleCount: Int,
+    val restingBpmEstimate: Double,                // 10th percentile
+    val medianBpm: Double,
+    val peakBpm: Double,
+    val percentExertion: Double,                   // % of samples >= 120 bpm
+    val recoveryWindowMinutes: Double,             // crude post-peak recovery time
+    val newestSampleMs: Long
+)
+
+data class BluetoothEcosystem(
+    val pairedCount: Int,
+    val pairedBrands: List<Pair<String, Int>>,     // top 5 inferred brands
+    val avgScanCount: Double,                      // avg devices per scan
+    val totalUniqueScannedDevices7d: Int,
+    val ecosystemLabel: String                     // "apple_centric", "samsung_centric", "mixed", "minimal"
+)
+
+data class CalendarDensity(
+    val events30d: Int,
+    val eventsThisWeek: Int,
+    val avgEventsPerWorkday: Double,
+    val recurringEvents: Int,
+    val medianEventDurationMin: Double,
+    val backToBackPercent: Double,                 // events with <15min gap
+    val latestEventTitleHash: String?              // hashed before surfacing in UI
+)
+
+data class PhotoActivity(
+    val photos30d: Int,
+    val photosLast7d: Int,
+    val distinctLocations30d: Int,                 // by rounded EXIF GPS
+    val photosWithGps: Int,
+    val photosWithoutGps: Int,
+    val cameraDiversity: Int,                      // distinct camera makes/models
+    val activityHourMode: Int                      // most common hour of capture
+)
+
+data class NotificationStress(
+    val total7d: Int,
+    val perHourAvg: Double,
+    val lateNightShare: Double,                    // 22:00–06:00 fraction
+    val workHoursShare: Double,                    // 09:00–18:00 fraction
+    val topInterrupters: List<Pair<String, Int>>,
+    val heatmap: List<List<Int>>,                  // 7 (Mon–Sun) × 24 hours
+    val maxCellCount: Int,
+    val stressLabel: String                        // "calm", "moderate", "noisy", "saturated"
+)
+
+data class IntegrityTrust(
+    val rooted: Boolean,
+    val debuggerAttached: Boolean,
+    val adbEnabled: Boolean,
+    val developerOptions: Boolean,
+    val testKeys: Boolean,
+    val emulatorHeuristic: Boolean,
+    val playIntegrity: String,                     // "ok", "device_lock_failed", "unavailable", etc.
+    val trustScore: Int,                           // 0–100, 100 = stock + locked
+    val verdictLabel: String                       // "stock_locked", "developer", "modified", "compromised"
+)
+
+data class SpendingPulse(
+    val transactions30d: Int,
+    val transactionsThisWeek: Int,
+    val bankAlertCount30d: Int,
+    val notificationVolume30d: Int,                // bank/payment notifications
+    val otpCount30d: Int,
+    val payCadenceDays: Double?,                   // typical gap between large credit signals (days)
+    val activityLabel: String,                     // "quiet", "active", "heavy"
+    val topPaymentApps: List<Pair<String, Int>>    // package → notification count
+)
+
+data class CommunicationDepth(
+    val totalCalls30d: Int,
+    val avgCallMinutes: Double,
+    val totalSmsExchanged30d: Int,
+    val uniqueCounterparts30d: Int,
+    val closeTieRatio: Double,                     // top-5 share of calls
+    val latePercent: Double,                       // share after 22:00
+    val communicationStyle: String,                // "voice_first", "text_first", "balanced", "quiet"
+    val responsivenessScore: Double                // 0.0–1.0 inferred from call vs missed ratio
+)
+
 // ── ViewModel ────────────────────────────────────────────────────────
 
 @HiltViewModel
@@ -605,6 +742,17 @@ class InsightsViewModel @Inject constructor(
             val incomeDef = async { computeIncome() }
             val commuteDef = async { computeCommute() }
             val voiceDef = async { computeVoiceContext() }
+            val travelDef = async { computeTravelProfile() }
+            val socialGraphDef = async { computeSocialGraph() }
+            val activityProfileDef = async { computeActivityProfile() }
+            val heartRateDef = async { computeHeartRate() }
+            val bluetoothEcoDef = async { computeBluetoothEcosystem() }
+            val calendarDensityDef = async { computeCalendarDensity() }
+            val photoActivityDef = async { computePhotoActivity() }
+            val notifStressDef = async { computeNotificationStress() }
+            val integrityDef = async { computeIntegrityTrust() }
+            val spendingDef = async { computeSpendingPulse() }
+            val commDepthDef = async { computeCommunicationDepth() }
 
             val today = todayDef.await()
             val sleepDays = sleepDef.await()
@@ -634,6 +782,17 @@ class InsightsViewModel @Inject constructor(
             val income = incomeDef.await()
             val commute = commuteDef.await()
             val voiceContext = voiceDef.await()
+            val travelProfile = travelDef.await()
+            val socialGraph = socialGraphDef.await()
+            val activityProfile = activityProfileDef.await()
+            val heartRate = heartRateDef.await()
+            val bluetoothEcosystem = bluetoothEcoDef.await()
+            val calendarDensity = calendarDensityDef.await()
+            val photoActivity = photoActivityDef.await()
+            val notificationStress = notifStressDef.await()
+            val integrityTrust = integrityDef.await()
+            val spendingPulse = spendingDef.await()
+            val communicationDepth = commDepthDef.await()
             val permissionSummary = permissionSummaryDef.await()
 
             // Auto-generate metadata for any card not already tracked by buildMeta
@@ -656,6 +815,17 @@ class InsightsViewModel @Inject constructor(
             autoMeta("income", income != null, listOf("build_info", "carrier"), listOf("connectivity", "usage_stats"))
             autoMeta("commute", commute?.detected == true, listOf("location"), emptyList())
             autoMeta("voice", voiceContext != null, listOf("voice_transcription"), emptyList())
+            autoMeta("travel", travelProfile != null, listOf("carrier", "location"), listOf("public_ip", "media_exif"))
+            autoMeta("social_graph", socialGraph != null, listOf("contacts"), listOf("notification_listener", "calendar", "call_log", "sms"))
+            autoMeta("activity_profile", activityProfile != null, listOf("activity_recognition"), emptyList())
+            autoMeta("heart_rate", heartRate != null, listOf("body_sensors"), emptyList())
+            autoMeta("bluetooth_eco", bluetoothEcosystem != null, listOf("bluetooth"), emptyList())
+            autoMeta("calendar_density", calendarDensity != null, listOf("calendar"), emptyList())
+            autoMeta("photo_activity", photoActivity != null, listOf("media_exif"), emptyList())
+            autoMeta("notification_stress", notificationStress != null, listOf("notification_listener"), emptyList())
+            autoMeta("integrity_trust", integrityTrust != null, listOf("integrity"), emptyList())
+            autoMeta("spending_pulse", spendingPulse != null, listOf("sms", "notification_listener"), listOf("logcat"))
+            autoMeta("communication_depth", communicationDepth != null, listOf("call_log", "sms"), listOf("contacts"))
 
             _state.update { it.copy(
                 loading = false,
@@ -692,6 +862,17 @@ class InsightsViewModel @Inject constructor(
                 income = income,
                 commute = commute,
                 voiceContext = voiceContext,
+                travelProfile = travelProfile,
+                socialGraph = socialGraph,
+                activityProfile = activityProfile,
+                heartRate = heartRate,
+                bluetoothEcosystem = bluetoothEcosystem,
+                calendarDensity = calendarDensity,
+                photoActivity = photoActivity,
+                notificationStress = notificationStress,
+                integrityTrust = integrityTrust,
+                spendingPulse = spendingPulse,
+                communicationDepth = communicationDepth,
                 cardMeta = metaAccumulator.toMap()
             ) }
         }
@@ -3366,6 +3547,660 @@ class InsightsViewModel @Inject constructor(
         return PermissionSummary(
             trackedCount = runtimePermissions.size + specialAccessChecks.size,
             missingCount = missingRuntimePermissions + missingSpecialAccess
+        )
+    }
+
+    // ── Inference 13: Travel Profile ─────────────────────────────────
+
+    private suspend fun computeTravelProfile(): TravelProfile? {
+        val now = System.currentTimeMillis()
+        val cutoff30d = now - 30 * 86_400_000L
+        val cutoff7d = now - 7 * 86_400_000L
+
+        val carrierData = dao.byCollectorSince("carrier", cutoff30d)
+        val countries = carrierData
+            .filter { it.key == "network_country_iso" }
+            .map { it.value.uppercase() }
+            .filter { it.isNotBlank() && it != "UNKNOWN" }
+            .distinct()
+
+        val isRoaming = carrierData
+            .filter { it.key == "is_roaming" }
+            .maxByOrNull { it.timestamp }
+            ?.value
+            ?.toBooleanStrictOrNull()
+            ?: false
+
+        val ipPoints = dao.byCollectorKeySince("public_ip", "public_ip", cutoff7d)
+            .map { it.value }
+            .filter { it.isNotBlank() && it != "unavailable" }
+            .distinct()
+        val publicIpChanges = (ipPoints.size - 1).coerceAtLeast(0)
+
+        val homeWork = _state.value.homeWork ?: computeHomeWork()
+        val home = homeWork?.homeCluster
+        val clusters = _state.value.locationClusters.ifEmpty { computeLocationClusters() }
+        val far = if (home != null) {
+            clusters.filter { c -> haversineKm(c.lat, c.lon, home.lat, home.lon) > 50.0 }
+        } else emptyList()
+        val medianTripRadius = if (home != null && far.isNotEmpty()) {
+            far.map { haversineKm(it.lat, it.lon, home.lat, home.lon) }.sorted().let { it[it.size / 2] }
+        } else 0.0
+
+        val photoData = dao.byCollectorSince("media_exif", cutoff30d)
+        val photoSpots = photoData
+            .mapNotNull { dp ->
+                val v = dp.value
+                val latStart = v.indexOf("\"exif_gps_lat\":")
+                val lonStart = v.indexOf("\"exif_gps_lon\":")
+                if (latStart < 0 || lonStart < 0) return@mapNotNull null
+                val lat = parseJsonNumber(v, latStart + 15) ?: return@mapNotNull null
+                val lon = parseJsonNumber(v, lonStart + 15) ?: return@mapNotNull null
+                "%.2f,%.2f".format(lat, lon)
+            }
+            .toSet()
+
+        if (countries.isEmpty() && far.isEmpty() && photoSpots.isEmpty() && publicIpChanges == 0 && !isRoaming) {
+            return null
+        }
+
+        val travelScore = (
+            (if (countries.size > 1) 0.3 else 0.0) +
+            (if (isRoaming) 0.2 else 0.0) +
+            (if (publicIpChanges >= 3) 0.15 else publicIpChanges * 0.05) +
+            (if (far.size >= 3) 0.2 else far.size * 0.05) +
+            (if (photoSpots.size >= 5) 0.15 else photoSpots.size * 0.02)
+        ).coerceIn(0.0, 1.0)
+
+        return TravelProfile(
+            countriesSeen30d = countries,
+            isCurrentlyRoaming = isRoaming,
+            publicIpChanges7d = publicIpChanges,
+            gpsClustersFarFromHome = far.size,
+            medianTripRadiusKm = medianTripRadius,
+            photoLocations30d = photoSpots.size,
+            travelScore = travelScore
+        )
+    }
+
+    private fun parseJsonNumber(json: String, startIndex: Int): Double? {
+        if (startIndex >= json.length) return null
+        var i = startIndex
+        // skip whitespace
+        while (i < json.length && json[i].isWhitespace()) i++
+        val begin = i
+        if (i < json.length && json[i] == '-') i++
+        while (i < json.length && (json[i].isDigit() || json[i] == '.' || json[i] == 'e' || json[i] == 'E' || json[i] == '+' || json[i] == '-')) i++
+        return json.substring(begin, i).toDoubleOrNull()
+    }
+
+    // ── Inference 14: Social Graph Size ──────────────────────────────
+
+    private suspend fun computeSocialGraph(): SocialGraphProfile? {
+        val now = System.currentTimeMillis()
+        val cutoff30d = now - 30 * 86_400_000L
+        val cutoff7d = now - 7 * 86_400_000L
+
+        val contactsCount = dao.latestByCollectorAndKey("contacts", "contact_count")
+            ?.value?.toLongOrNull() ?: 0L
+
+        val notifSenders = dao.byCollectorKeySince("notification_listener", "notif_posted", cutoff7d)
+            .map { it.value }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .size
+
+        val callCounterparts = dao.latestByCollectorAndKey("call_log", "unique_counterparts_30d")
+            ?.value?.toIntOrNull() ?: 0
+
+        val smsSenders = dao.latestByCollectorAndKey("sms", "unique_senders_30d")
+            ?.value?.toIntOrNull() ?: 0
+
+        val calendarPoints = dao.byCollectorSince("calendar", cutoff30d)
+            .filter { it.key.startsWith("event_") }
+        val attendeeCounts = calendarPoints.mapNotNull { dp ->
+            // organizer_email or attendees field — count semicolons in event title hash is meaningless
+            // We approximate attendee count from organizer presence (1) + body length heuristic
+            if (dp.value.contains("\"organizer_email\":\"\"")) 0 else 1
+        }
+        val avgAttendees = if (attendeeCounts.isNotEmpty()) attendeeCounts.average() else 0.0
+
+        if (contactsCount == 0L && notifSenders == 0 && callCounterparts == 0 &&
+            smsSenders == 0 && calendarPoints.isEmpty()) return null
+
+        val total = (contactsCount.toInt() + notifSenders + callCounterparts + smsSenders)
+        val breadth = when {
+            total >= 500 -> "broad"
+            total >= 150 -> "moderate"
+            total >= 30 -> "small"
+            else -> "isolated"
+        }
+
+        return SocialGraphProfile(
+            hashedContacts = contactsCount,
+            uniqueNotificationSenders7d = notifSenders,
+            uniqueCallCounterparts30d = callCounterparts,
+            uniqueSmsSenders30d = smsSenders,
+            calendarAttendeesPerEventAvg = avgAttendees,
+            totalConnections = total,
+            socialBreadth = breadth
+        )
+    }
+
+    // ── Inference 15: Activity Profile ───────────────────────────────
+
+    private suspend fun computeActivityProfile(): ActivityProfile? {
+        val cutoff30d = System.currentTimeMillis() - 30 * 86_400_000L
+        val activities = dao.byCollectorKeySince("activity_recognition", "activity", cutoff30d)
+        if (activities.isEmpty()) return null
+
+        val confidences = dao.byCollectorKeySince("activity_recognition", "confidence_estimate", cutoff30d)
+            .mapNotNull { it.value.toDoubleOrNull() }
+        val avgConfidence = if (confidences.isNotEmpty()) confidences.average() else 0.0
+
+        val buckets = activities.groupingBy { it.value.lowercase() }.eachCount()
+        val total = activities.size.toDouble()
+        fun pct(label: String): Double = (buckets[label]?.toDouble() ?: 0.0) / total
+
+        val still = pct("still") + pct("unknown") * 0.0
+        val walking = pct("walking") + pct("on_foot")
+        val running = pct("running")
+        val vehicle = pct("in_vehicle") + pct("vehicle")
+        val bicycle = pct("on_bicycle")
+
+        val moveIndex = (
+            walking * 0.4 +
+            running * 0.7 +
+            bicycle * 0.6 +
+            vehicle * 0.3
+        ).coerceIn(0.0, 1.0)
+
+        return ActivityProfile(
+            sampleCount = activities.size,
+            percentStill = still,
+            percentWalking = walking,
+            percentRunning = running,
+            percentVehicle = vehicle,
+            percentBicycle = bicycle,
+            avgConfidence = avgConfidence,
+            movementIndex = moveIndex
+        )
+    }
+
+    // ── Inference 16: Heart Rate Profile ─────────────────────────────
+
+    private suspend fun computeHeartRate(): HeartRateProfile? {
+        val cutoff30d = System.currentTimeMillis() - 30 * 86_400_000L
+        val readings = dao.byCollectorKeySince("body_sensors", "heart_rate_bpm", cutoff30d)
+            .mapNotNull { dp -> dp.value.toDoubleOrNull()?.let { dp.timestamp to it } }
+            .filter { it.second in 30.0..220.0 }
+            .sortedBy { it.first }
+        if (readings.isEmpty()) return null
+
+        val values = readings.map { it.second }.sorted()
+        val resting = values[(values.size * 0.10).toInt().coerceAtMost(values.size - 1)]
+        val median = values[values.size / 2]
+        val peak = values.last()
+        val exertionShare = values.count { it >= 120.0 }.toDouble() / values.size
+
+        // Recovery window: time between peak and first sub-100 reading after that peak
+        val peakIdx = readings.indexOfFirst { it.second == peak }
+        val recoveryMin = if (peakIdx >= 0) {
+            val tail = readings.drop(peakIdx + 1)
+            val recovered = tail.firstOrNull { it.second < 100.0 }
+            if (recovered != null) (recovered.first - readings[peakIdx].first) / 60_000.0 else Double.NaN
+        } else Double.NaN
+        val recoveryClean = if (recoveryMin.isNaN()) 0.0 else recoveryMin
+
+        return HeartRateProfile(
+            sampleCount = readings.size,
+            restingBpmEstimate = resting,
+            medianBpm = median,
+            peakBpm = peak,
+            percentExertion = exertionShare,
+            recoveryWindowMinutes = recoveryClean,
+            newestSampleMs = readings.last().first
+        )
+    }
+
+    // ── Inference 17: Bluetooth Ecosystem ────────────────────────────
+
+    private suspend fun computeBluetoothEcosystem(): BluetoothEcosystem? {
+        val cutoff7d = System.currentTimeMillis() - 7 * 86_400_000L
+        val pairedRows = dao.byCollectorKeySince("bluetooth", "paired_devices", cutoff7d)
+        val scanRows = dao.byCollectorKeySince("bluetooth", "scan_results", cutoff7d)
+        if (pairedRows.isEmpty() && scanRows.isEmpty()) return null
+
+        val latestPaired = pairedRows.maxByOrNull { it.timestamp }?.value.orEmpty()
+        val pairedNames = extractJsonStringField(latestPaired, "name")
+        val pairedCount = pairedNames.size
+
+        // Brand inference from device names — purely string-based, no MAC OUI lookup.
+        val brandHints = mapOf(
+            "airpods|beats|magic|imac|ipad|iphone|apple" to "Apple",
+            "galaxy|samsung|buds" to "Samsung",
+            "pixel|nest|google" to "Google",
+            "bose" to "Bose",
+            "sony|wh-|wf-" to "Sony",
+            "logitech|mx |master " to "Logitech",
+            "tile|airtag" to "Trackers",
+            "fitbit|garmin|polar|wahoo|whoop" to "Wearable",
+            "tv|chromecast|firetv|roku" to "TV/Media",
+            "car|honda|toyota|ford|bmw|tesla|lexus|hyundai|kia|chevrolet|nissan|infotainment" to "Auto"
+        )
+        val brandCounts = mutableMapOf<String, Int>()
+        for (name in pairedNames) {
+            val lower = name.lowercase()
+            for ((pat, brand) in brandHints) {
+                if (pat.toRegex().containsMatchIn(lower)) {
+                    brandCounts[brand] = (brandCounts[brand] ?: 0) + 1
+                    break
+                }
+            }
+        }
+        val topBrands = brandCounts.entries
+            .sortedByDescending { it.value }
+            .take(5)
+            .map { it.key to it.value }
+
+        val scanCounts = scanRows.map { row ->
+            extractJsonStringField(row.value, "address").size
+        }
+        val avgScanCount = if (scanCounts.isNotEmpty()) scanCounts.average() else 0.0
+
+        val uniqueScanned = scanRows.flatMap { extractJsonStringField(it.value, "address") }
+            .filter { it.isNotBlank() }
+            .toSet()
+            .size
+
+        val ecosystem = when {
+            (brandCounts["Apple"] ?: 0) >= 2 -> "apple_centric"
+            (brandCounts["Samsung"] ?: 0) >= 2 -> "samsung_centric"
+            (brandCounts["TV/Media"] ?: 0) + (brandCounts["Auto"] ?: 0) >= 1 &&
+                brandCounts.values.any { it >= 1 } -> "media_or_auto"
+            brandCounts.size >= 3 -> "mixed"
+            pairedCount > 0 -> "minimal"
+            else -> "none"
+        }
+
+        return BluetoothEcosystem(
+            pairedCount = pairedCount,
+            pairedBrands = topBrands,
+            avgScanCount = avgScanCount,
+            totalUniqueScannedDevices7d = uniqueScanned,
+            ecosystemLabel = ecosystem
+        )
+    }
+
+    private fun extractJsonStringField(json: String, fieldName: String): List<String> {
+        if (json.isBlank()) return emptyList()
+        val pattern = Regex("\"$fieldName\"\\s*:\\s*\"([^\"]*)\"")
+        return pattern.findAll(json).map { it.groupValues[1] }.toList()
+    }
+
+    // ── Inference 18: Calendar Density ───────────────────────────────
+
+    private suspend fun computeCalendarDensity(): CalendarDensity? {
+        val now = System.currentTimeMillis()
+        val cutoff30d = now - 30 * 86_400_000L
+        val cutoff7d = now - 7 * 86_400_000L
+        val raw = dao.byCollectorSince("calendar", cutoff30d)
+            .filter { it.key.startsWith("event_") }
+        if (raw.isEmpty()) return null
+
+        // Deduplicate to latest per event id
+        val byId = raw.groupBy { it.key }.mapValues { (_, l) -> l.maxByOrNull { it.timestamp }!! }
+
+        data class Event(val startMs: Long, val endMs: Long, val titleHash: String)
+        val events = byId.values.mapNotNull { dp ->
+            val start = parseJsonNumber(dp.value, dp.value.indexOf("\"start_ms\":") + 11)?.toLong() ?: return@mapNotNull null
+            val end = parseJsonNumber(dp.value, dp.value.indexOf("\"end_ms\":") + 9)?.toLong() ?: start
+            // The collector stores raw titles; we don't surface them — keep a bounded prefix as opaque hash.
+            val titleStart = dp.value.indexOf("\"title\":\"")
+            val titlePrefix = if (titleStart >= 0) {
+                val begin = titleStart + 9
+                val close = dp.value.indexOf("\"", begin)
+                if (close > begin) dp.value.substring(begin, close).hashCode().toString(16) else ""
+            } else ""
+            Event(start, end, titlePrefix)
+        }.sortedBy { it.startMs }
+
+        val past30 = events.filter { it.startMs in cutoff30d..now }
+        val thisWeek = events.filter { it.startMs in cutoff7d..(now + 7 * 86_400_000L) }
+
+        val workdayEvents = past30.filter { e ->
+            val dow = Instant.ofEpochMilli(e.startMs).atZone(zone).dayOfWeek.value
+            dow in 1..5
+        }
+        val avgPerWorkday = if (workdayEvents.isNotEmpty()) workdayEvents.size / 22.0 else 0.0
+
+        // Recurring detection: same title hash appearing >= 3 times.
+        val recurring = past30.groupingBy { it.titleHash }.eachCount().count { it.value >= 3 }
+
+        val durations = past30.map { (it.endMs - it.startMs) / 60_000.0 }.filter { it in 1.0..1440.0 }
+        val medianDur = if (durations.isNotEmpty()) durations.sorted()[durations.size / 2] else 0.0
+
+        var backToBack = 0
+        var pairs = 0
+        for (i in 0 until past30.size - 1) {
+            val gap = past30[i + 1].startMs - past30[i].endMs
+            if (gap in 0..15 * 60_000L) backToBack++
+            pairs++
+        }
+        val backToBackPct = if (pairs > 0) backToBack.toDouble() / pairs else 0.0
+
+        return CalendarDensity(
+            events30d = past30.size,
+            eventsThisWeek = thisWeek.size,
+            avgEventsPerWorkday = avgPerWorkday,
+            recurringEvents = recurring,
+            medianEventDurationMin = medianDur,
+            backToBackPercent = backToBackPct,
+            latestEventTitleHash = events.lastOrNull()?.titleHash
+        )
+    }
+
+    // ── Inference 19: Photo Activity ─────────────────────────────────
+
+    private suspend fun computePhotoActivity(): PhotoActivity? {
+        val now = System.currentTimeMillis()
+        val cutoff30d = now - 30 * 86_400_000L
+        val cutoff7d = now - 7 * 86_400_000L
+        val rows = dao.byCollectorSince("media_exif", cutoff30d)
+            .filter { it.key.startsWith("image_") }
+        if (rows.isEmpty()) return null
+
+        val byId = rows.groupBy { it.key }.mapValues { (_, l) -> l.maxByOrNull { it.timestamp }!! }
+        val photos30 = byId.values.mapNotNull { dp ->
+            val dateStart = dp.value.indexOf("\"date_taken\":")
+            val dateMs = if (dateStart >= 0) parseJsonNumber(dp.value, dateStart + 13)?.toLong() else null
+            val takenTs = dateMs?.takeIf { it > 0 } ?: dp.timestamp
+            Triple(takenTs, dp.value, dp)
+        }
+        val photos7 = photos30.filter { it.first >= cutoff7d }
+
+        val withGps = photos30.count { it.second.contains("\"exif_gps_lat\":") }
+        val withoutGps = photos30.size - withGps
+
+        val locations = photos30.mapNotNull { (_, v, _) ->
+            val latStart = v.indexOf("\"exif_gps_lat\":")
+            val lonStart = v.indexOf("\"exif_gps_lon\":")
+            if (latStart < 0 || lonStart < 0) return@mapNotNull null
+            val lat = parseJsonNumber(v, latStart + 15) ?: return@mapNotNull null
+            val lon = parseJsonNumber(v, lonStart + 15) ?: return@mapNotNull null
+            "%.2f,%.2f".format(lat, lon)
+        }.toSet()
+
+        val cameras = photos30.mapNotNull { (_, v, _) ->
+            val makeStart = v.indexOf("\"exif_camera_make\":\"")
+            val modelStart = v.indexOf("\"exif_camera_model\":\"")
+            val make = if (makeStart >= 0) {
+                val begin = makeStart + 20
+                val close = v.indexOf("\"", begin)
+                if (close > begin) v.substring(begin, close) else null
+            } else null
+            val model = if (modelStart >= 0) {
+                val begin = modelStart + 21
+                val close = v.indexOf("\"", begin)
+                if (close > begin) v.substring(begin, close) else null
+            } else null
+            val combined = "$make $model".trim()
+            if (combined.isBlank()) null else combined
+        }.toSet().size
+
+        val hourMode = photos30.map {
+            Instant.ofEpochMilli(it.first).atZone(zone).toLocalTime().hour
+        }.groupingBy { it }.eachCount()
+            .maxByOrNull { it.value }?.key ?: 12
+
+        return PhotoActivity(
+            photos30d = photos30.size,
+            photosLast7d = photos7.size,
+            distinctLocations30d = locations.size,
+            photosWithGps = withGps,
+            photosWithoutGps = withoutGps,
+            cameraDiversity = cameras,
+            activityHourMode = hourMode
+        )
+    }
+
+    // ── Inference 20: Notification Stress (heatmap) ──────────────────
+
+    private suspend fun computeNotificationStress(): NotificationStress? {
+        val now = System.currentTimeMillis()
+        val cutoff7d = now - 7 * 86_400_000L
+        val notifs = dao.byCollectorKeySince("notification_listener", "notif_posted", cutoff7d)
+        if (notifs.isEmpty()) return null
+
+        val total = notifs.size
+        val perHour = total / (7.0 * 24.0)
+
+        val hours = notifs.map {
+            Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalTime().hour
+        }
+        val lateNight = hours.count { it >= 22 || it < 6 }.toDouble() / total
+        val workHours = hours.count { it in 9..17 }.toDouble() / total
+
+        val byPkg = notifs.groupingBy { it.value }.eachCount()
+            .toList()
+            .sortedByDescending { it.second }
+            .take(8)
+
+        // 7×24 heatmap: row = day-of-week (Mon=0..Sun=6), col = hour
+        val heatmap = Array(7) { IntArray(24) }
+        for (n in notifs) {
+            val zdt = Instant.ofEpochMilli(n.timestamp).atZone(zone)
+            val dow = (zdt.dayOfWeek.value - 1).coerceIn(0, 6)
+            val hr = zdt.toLocalTime().hour.coerceIn(0, 23)
+            heatmap[dow][hr]++
+        }
+        val maxCell = heatmap.maxOf { it.max() }
+
+        val label = when {
+            perHour >= 8.0 -> "saturated"
+            perHour >= 3.0 -> "noisy"
+            perHour >= 1.0 -> "moderate"
+            else -> "calm"
+        }
+
+        return NotificationStress(
+            total7d = total,
+            perHourAvg = perHour,
+            lateNightShare = lateNight,
+            workHoursShare = workHours,
+            topInterrupters = byPkg,
+            heatmap = heatmap.map { it.toList() },
+            maxCellCount = maxCell,
+            stressLabel = label
+        )
+    }
+
+    // ── Inference 21: Integrity Trust ────────────────────────────────
+
+    private suspend fun computeIntegrityTrust(): IntegrityTrust? {
+        val rows = dao.byCollector("integrity", 200)
+        if (rows.isEmpty()) return null
+
+        fun latestBool(key: String): Boolean = rows
+            .filter { it.key == key }
+            .maxByOrNull { it.timestamp }
+            ?.value
+            ?.toBooleanStrictOrNull() ?: false
+
+        fun latestStr(key: String): String = rows
+            .filter { it.key == key }
+            .maxByOrNull { it.timestamp }
+            ?.value ?: ""
+
+        val rooted = latestBool("rooted_heuristic") || latestBool("su_binary_present")
+        val debugger = latestBool("debugger_attached")
+        val adb = latestBool("adb_enabled")
+        val devOpts = latestBool("developer_options")
+        val testKeys = latestBool("test_keys")
+        val emulator = latestBool("emulator_heuristic")
+        val playIntegrity = latestStr("play_integrity_attestation")
+            .ifBlank { "unavailable" }
+
+        // Trust score: 100 - penalties
+        var score = 100
+        if (rooted) score -= 40
+        if (testKeys) score -= 20
+        if (emulator) score -= 25
+        if (debugger) score -= 10
+        if (adb) score -= 10
+        if (devOpts) score -= 5
+
+        val verdict = when {
+            rooted || testKeys || emulator -> "compromised"
+            adb && devOpts -> "developer"
+            devOpts || debugger -> "modified"
+            else -> "stock_locked"
+        }
+
+        return IntegrityTrust(
+            rooted = rooted,
+            debuggerAttached = debugger,
+            adbEnabled = adb,
+            developerOptions = devOpts,
+            testKeys = testKeys,
+            emulatorHeuristic = emulator,
+            playIntegrity = playIntegrity,
+            trustScore = score.coerceIn(0, 100),
+            verdictLabel = verdict
+        )
+    }
+
+    // ── Inference 22 (NEW): Spending Pulse ───────────────────────────
+
+    private suspend fun computeSpendingPulse(): SpendingPulse? {
+        val now = System.currentTimeMillis()
+        val cutoff30d = now - 30 * 86_400_000L
+
+        val txn30 = dao.latestByCollectorAndKey("sms", "transaction_count_30d")
+            ?.value?.toIntOrNull() ?: 0
+        val bank30 = dao.latestByCollectorAndKey("sms", "bank_alert_count_30d")
+            ?.value?.toIntOrNull() ?: 0
+        val otp30 = dao.latestByCollectorAndKey("sms", "otp_count_30d")
+            ?.value?.toIntOrNull() ?: 0
+
+        val txnThisWeekProxy = (txn30 * 7.0 / 30.0).toInt()
+
+        val notifs = dao.byCollectorKeySince("notification_listener", "notif_posted", cutoff30d)
+        val financePackagePatterns = listOf(
+            "bank", "chase", "bofa", "wellsfargo", "capitalone", "discover", "amex",
+            "citi", "venmo", "zelle", "paypal", "cashapp", "cash.app", "google.android.apps.walletnfcrel",
+            "wallet", "robinhood", "fidelity", "schwab", "etrade", "ally", "usbank"
+        )
+        val financeNotifs = notifs.filter { dp ->
+            val lower = dp.value.lowercase()
+            financePackagePatterns.any { lower.contains(it) }
+        }
+        val notifVolume = financeNotifs.size
+        val topPay = financeNotifs.groupingBy { it.value }.eachCount()
+            .toList().sortedByDescending { it.second }.take(5)
+
+        if (txn30 == 0 && bank30 == 0 && notifVolume == 0) return null
+
+        // Pay cadence: bucket bank alerts by day, look at gap distribution between
+        // peaks above the daily mean. Crude — but cheap and good enough as a hint.
+        val bankNotifsByDay = financeNotifs
+            .map { Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate() }
+            .groupingBy { it }
+            .eachCount()
+            .toList()
+            .sortedBy { it.first }
+        val cadenceDays: Double? = if (bankNotifsByDay.size >= 4) {
+            val mean = bankNotifsByDay.map { it.second }.average()
+            val peakDays = bankNotifsByDay.filter { it.second > mean * 1.5 }.map { it.first }
+            if (peakDays.size >= 2) {
+                val gaps = (1 until peakDays.size).map { i ->
+                    java.time.temporal.ChronoUnit.DAYS.between(peakDays[i - 1], peakDays[i]).toDouble()
+                }
+                if (gaps.isNotEmpty()) gaps.average() else null
+            } else null
+        } else null
+
+        val totalActivity = txn30 + bank30 + notifVolume
+        val activityLabel = when {
+            totalActivity >= 100 -> "heavy"
+            totalActivity >= 25 -> "active"
+            else -> "quiet"
+        }
+
+        return SpendingPulse(
+            transactions30d = txn30,
+            transactionsThisWeek = txnThisWeekProxy,
+            bankAlertCount30d = bank30,
+            notificationVolume30d = notifVolume,
+            otpCount30d = otp30,
+            payCadenceDays = cadenceDays,
+            activityLabel = activityLabel,
+            topPaymentApps = topPay
+        )
+    }
+
+    // ── Inference 23 (NEW): Communication Depth ──────────────────────
+
+    private suspend fun computeCommunicationDepth(): CommunicationDepth? {
+        val inbound = dao.latestByCollectorAndKey("call_log", "inbound_30d")?.value?.toIntOrNull() ?: 0
+        val outbound = dao.latestByCollectorAndKey("call_log", "outbound_30d")?.value?.toIntOrNull() ?: 0
+        val missed = dao.latestByCollectorAndKey("call_log", "missed_30d")?.value?.toIntOrNull() ?: 0
+        val totalCalls = inbound + outbound
+        val totalDur = dao.latestByCollectorAndKey("call_log", "total_duration_seconds_30d")
+            ?.value?.toLongOrNull() ?: 0L
+        val unique = dao.latestByCollectorAndKey("call_log", "unique_counterparts_30d")
+            ?.value?.toIntOrNull() ?: 0
+        val topShare = dao.latestByCollectorAndKey("call_log", "top5_counterpart_share_30d")
+            ?.value?.toDoubleOrNull() ?: 0.0
+
+        val smsInbox = dao.latestByCollectorAndKey("sms", "inbox_30d")?.value?.toIntOrNull() ?: 0
+        val smsSent = dao.latestByCollectorAndKey("sms", "sent_30d")?.value?.toIntOrNull() ?: 0
+        val totalSms = smsInbox + smsSent
+
+        if (totalCalls == 0 && totalSms == 0) return null
+
+        val avgCallMin = if (totalCalls > 0) (totalDur / 60.0) / totalCalls else 0.0
+
+        // Late-night share: combine call_log and sms histograms.
+        val callHistRow = dao.latestByCollectorAndKey("call_log", "hour_histogram_30d")?.value
+        val smsHistRow = dao.latestByCollectorAndKey("sms", "hour_histogram_30d")?.value
+        val hist = IntArray(24)
+        fun mergeHist(json: String?) {
+            if (json.isNullOrBlank()) return
+            try {
+                val nums = Json.parseToJsonElement(json).jsonArray
+                nums.forEachIndexed { i, el ->
+                    if (i < 24) hist[i] += el.jsonPrimitive.content.toIntOrNull() ?: 0
+                }
+            } catch (_: Exception) { }
+        }
+        mergeHist(callHistRow)
+        mergeHist(smsHistRow)
+        val histTotal = hist.sum()
+        val latePct = if (histTotal > 0) {
+            (hist.sliceArray(22..23).sum() + hist.sliceArray(0..5).sum()).toDouble() / histTotal
+        } else 0.0
+
+        val style = when {
+            totalCalls == 0 && totalSms == 0 -> "quiet"
+            totalCalls > totalSms * 0.5 && totalDur > 600 -> "voice_first"
+            totalSms > totalCalls * 5 -> "text_first"
+            else -> "balanced"
+        }
+
+        val responsiveness = if (totalCalls + missed > 0) {
+            (inbound.toDouble() / (inbound + missed)).coerceIn(0.0, 1.0)
+        } else 0.5
+
+        return CommunicationDepth(
+            totalCalls30d = totalCalls,
+            avgCallMinutes = avgCallMin,
+            totalSmsExchanged30d = totalSms,
+            uniqueCounterparts30d = unique,
+            closeTieRatio = topShare,
+            latePercent = latePct,
+            communicationStyle = style,
+            responsivenessScore = responsiveness
         )
     }
 

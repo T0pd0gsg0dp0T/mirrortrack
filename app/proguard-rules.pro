@@ -5,6 +5,14 @@
 # Argon2kt native bindings
 -keep class com.lambdapioneer.argon2kt.** { *; }
 
+# Vosk offline speech recognition JNI/native API
+-keep class org.vosk.** { *; }
+-keep class org.kaldi.** { *; }
+-keep class com.sun.jna.** { *; }
+-dontwarn org.vosk.**
+-dontwarn org.kaldi.**
+-dontwarn com.sun.jna.**
+
 # Hilt / Dagger generated
 -keep class dagger.hilt.** { *; }
 -keep class * extends dagger.hilt.internal.GeneratedComponent { *; }

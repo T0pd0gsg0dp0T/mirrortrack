@@ -69,6 +69,11 @@ import androidx.compose.material.icons.filled.DeviceHub
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -319,6 +324,61 @@ fun InsightsScreen(
         state.identityEntropy?.let { entropy ->
             add(ActiveInsightCard("entropy", "Identity Entropy", meta["entropy"], InsightCardGroup.TECHNICAL) {
                 IdentityEntropyCard(entropy, meta["entropy"], diag)
+            })
+        }
+        state.travelProfile?.let { tp ->
+            add(ActiveInsightCard("travel", "Travel Profile", meta["travel"], InsightCardGroup.PATTERN) {
+                TravelProfileCard(tp, meta["travel"], diag)
+            })
+        }
+        state.socialGraph?.let { sg ->
+            add(ActiveInsightCard("socialgraph", "Social Graph", meta["social_graph"], InsightCardGroup.CONTEXT) {
+                SocialGraphCard(sg, meta["social_graph"], diag)
+            })
+        }
+        state.activityProfile?.let { ap ->
+            add(ActiveInsightCard("activityprofile", "Activity Profile", meta["activity_profile"], InsightCardGroup.CONTEXT) {
+                ActivityProfileCard(ap, meta["activity_profile"], diag)
+            })
+        }
+        state.heartRate?.let { hr ->
+            add(ActiveInsightCard("heartrate", "Heart Rate", meta["heart_rate"], InsightCardGroup.CONTEXT) {
+                HeartRateCard(hr, meta["heart_rate"], diag)
+            })
+        }
+        state.bluetoothEcosystem?.let { be ->
+            add(ActiveInsightCard("bluetooth", "Bluetooth Ecosystem", meta["bluetooth_eco"], InsightCardGroup.CONTEXT) {
+                BluetoothEcosystemCard(be, meta["bluetooth_eco"], diag)
+            })
+        }
+        state.calendarDensity?.let { cd ->
+            add(ActiveInsightCard("calendar", "Calendar Density", meta["calendar_density"], InsightCardGroup.PATTERN) {
+                CalendarDensityCard(cd, meta["calendar_density"], diag)
+            })
+        }
+        state.photoActivity?.let { pa ->
+            add(ActiveInsightCard("photo", "Photo Activity", meta["photo_activity"], InsightCardGroup.PATTERN) {
+                PhotoActivityCard(pa, meta["photo_activity"], diag)
+            })
+        }
+        state.notificationStress?.let { ns ->
+            add(ActiveInsightCard("notifstress", "Notification Heatmap", meta["notification_stress"], InsightCardGroup.ATTENTION) {
+                NotificationStressCard(ns, meta["notification_stress"], diag)
+            })
+        }
+        state.integrityTrust?.let { it_ ->
+            add(ActiveInsightCard("integrity", "Integrity Trust", meta["integrity_trust"], InsightCardGroup.TECHNICAL) {
+                IntegrityTrustCard(it_, meta["integrity_trust"], diag)
+            })
+        }
+        state.spendingPulse?.let { sp ->
+            add(ActiveInsightCard("spending", "Spending Pulse", meta["spending_pulse"], InsightCardGroup.ATTENTION) {
+                SpendingPulseCard(sp, meta["spending_pulse"], diag)
+            })
+        }
+        state.communicationDepth?.let { cdepth ->
+            add(ActiveInsightCard("commdepth", "Communication Depth", meta["communication_depth"], InsightCardGroup.PATTERN) {
+                CommunicationDepthCard(cdepth, meta["communication_depth"], diag)
             })
         }
     }
@@ -661,6 +721,17 @@ private fun unavailableInsightsFor(state: InsightsState): List<UnavailableInsigh
     if (state.dataFlow.isEmpty()) add(UnavailableInsight("Data Flow", Icons.Default.SwapVert, "Waiting for per-app network traffic totals."))
     if (state.fingerprint.isEmpty()) add(UnavailableInsight("Fingerprint Stability", Icons.Default.Fingerprint, "Waiting for device identity fields to compare over time."))
     if (state.identityEntropy == null) add(UnavailableInsight("Identity Entropy", Icons.Default.Fingerprint, "Waiting for enough device traits to show how uniqueness is estimated."))
+    if (state.travelProfile == null) add(UnavailableInsight("Travel Profile", Icons.Default.Public, "Waiting for roaming, public-IP, location, or photo-location clues that indicate travel."))
+    if (state.socialGraph == null) add(UnavailableInsight("Social Graph", Icons.Default.Forum, "Waiting for contacts, notifications, calendar, call, or SMS metadata to estimate relationship breadth."))
+    if (state.activityProfile == null) add(UnavailableInsight("Activity Profile", Icons.Default.DirectionsCar, "Waiting for activity-recognition samples that classify still, walking, running, or vehicle movement."))
+    if (state.heartRate == null) add(UnavailableInsight("Heart Rate", Icons.Default.Favorite, "Waiting for BODY_SENSORS heart-rate samples from a supported sensor or wearable."))
+    if (state.bluetoothEcosystem == null) add(UnavailableInsight("Bluetooth Ecosystem", Icons.Default.Bluetooth, "Waiting for paired-device or nearby BLE scan summaries."))
+    if (state.calendarDensity == null) add(UnavailableInsight("Calendar Density", Icons.Default.CalendarMonth, "Waiting for calendar events to estimate schedule density and meeting fragmentation."))
+    if (state.photoActivity == null) add(UnavailableInsight("Photo Activity", Icons.Default.PhotoCamera, "Waiting for local photo EXIF metadata; no image pixels are inspected."))
+    if (state.notificationStress == null) add(UnavailableInsight("Notification Heatmap", Icons.Default.Notifications, "Waiting for notification-listener events across enough hours to build an interruption heatmap."))
+    if (state.integrityTrust == null) add(UnavailableInsight("Integrity Trust", Icons.Default.Shield, "Waiting for device integrity readings such as root, ADB, debugger, and emulator indicators."))
+    if (state.spendingPulse == null) add(UnavailableInsight("Spending Pulse", Icons.Default.AttachMoney, "Waiting for bank-alert, OTP, transaction, or finance-notification metadata."))
+    if (state.communicationDepth == null) add(UnavailableInsight("Communication Depth", Icons.Default.Forum, "Waiting for call and SMS aggregates to estimate communication style."))
 }
 
 @Composable
@@ -984,15 +1055,19 @@ private fun InsightToolbar(
 private fun insightGroupForTitle(title: String): InsightCardGroup = when (title) {
     "Engagement Score", "Today", "Sleep", "Sleep Timeline" -> InsightCardGroup.SUMMARY
     "Home & Work", "Commute Pattern", "Location Clusters", "Dwell Times",
-    "Circadian Rhythm", "Routine Predictability", "Weekday vs Weekend", "Monthly Trends" ->
+    "Circadian Rhythm", "Routine Predictability", "Weekday vs Weekend", "Monthly Trends",
+    "Travel Profile", "Calendar Density", "Photo Activity", "Communication Depth" ->
         InsightCardGroup.PATTERN
     "Social Pressure", "Unlock After Notification", "Privacy Radar",
-    "App Compulsion Index", "Session Fragmentation" ->
+    "App Compulsion Index", "Session Fragmentation",
+    "Notification Heatmap", "Spending Pulse" ->
         InsightCardGroup.ATTENTION
     "Voice Context", "Device Health", "Charging Behavior", "Income Inference",
-    "WiFi Footprint", "App Portfolio" ->
+    "WiFi Footprint", "App Portfolio",
+    "Social Graph", "Activity Profile", "Heart Rate", "Bluetooth Ecosystem" ->
         InsightCardGroup.CONTEXT
-    "App Attention (7d)", "Data Flow", "Fingerprint Stability", "Identity Entropy" ->
+    "App Attention (7d)", "Data Flow", "Fingerprint Stability", "Identity Entropy",
+    "Integrity Trust" ->
         InsightCardGroup.TECHNICAL
     else -> InsightCardGroup.SUMMARY
 }
@@ -1024,7 +1099,15 @@ private fun SectionLabel(text: String, icon: ImageVector, color: Color) {
 
 @Composable
 private fun TodayCard(data: TodayData, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Today", icon = Icons.Default.Timeline, accent = insightAccentForTitle("Today"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = listOf(
+        "data_points" to "${data.dataPoints}",
+        "unlocks" to "${data.unlocks}",
+        "screen_time_ms" to "${data.screenTimeMs}",
+        "steps" to "${data.steps}",
+        "battery_delta_pct" to "${data.batteryDeltaPct}",
+        "active_collectors" to "${data.activeCollectors}"
+    )
+    InsightCardShell(title = "Today", icon = Icons.Default.Timeline, accent = insightAccentForTitle("Today"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         val stats = listOf(
             Triple(Icons.Default.Storage, "${data.dataPoints}", "data points"),
             Triple(Icons.Default.LockOpen, "${data.unlocks}", "unlocks"),
@@ -1078,7 +1161,20 @@ private fun SleepTimelineCard(
     meta: InsightMeta? = null,
     showDiagnostics: Boolean = false
 ) {
-    InsightCardShell(title = "Sleep", icon = Icons.Default.Bed, accent = insightAccentForTitle("Sleep"), meta = meta, showDiagnostics = showDiagnostics) {
+    val totalSleepMsAll = intervals.sumOf { it.durationMs }
+    val avgConfidence = intervals.takeIf { it.isNotEmpty() }?.map { it.confidence }?.average()
+    val avgLux = intervals.mapNotNull { it.averageLux }.takeIf { it.isNotEmpty() }?.average()
+    val avgSnd = intervals.mapNotNull { it.averageSoundDbfs }.takeIf { it.isNotEmpty() }?.average()
+    val sleepSnapshot = listOf(
+        "intervals_72h" to "${intervals.size}",
+        "total_sleep_ms" to "$totalSleepMsAll",
+        "sleep_days_recorded" to "${days.size}",
+        "avg_confidence" to (avgConfidence?.let { "%.2f".format(it) } ?: "n/a"),
+        "avg_ambient_lux" to (avgLux?.let { "%.1f".format(it) } ?: "n/a"),
+        "avg_ambient_dbfs" to (avgSnd?.let { "%.1f".format(it) } ?: "n/a"),
+        "evidence_signals" to (intervals.flatMap { it.evidence }.distinct().joinToString(",").ifEmpty { "n/a" })
+    )
+    InsightCardShell(title = "Sleep", icon = Icons.Default.Bed, accent = insightAccentForTitle("Sleep"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = sleepSnapshot) {
         val now = remember(intervals) { System.currentTimeMillis() }
         val windowMs = 72 * 3_600_000L
         val windowStart = now - windowMs
@@ -1265,7 +1361,14 @@ private fun formatTimelineTime(timestampMs: Long): String =
 
 @Composable
 private fun AppAttentionCard(apps: List<AppAttention>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "App Attention (7d)", icon = Icons.Default.Smartphone, accent = insightAccentForTitle("App Attention (7d)"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = buildList {
+        add("apps_tracked" to "${apps.size}")
+        add("total_fg_ms_7d" to "${apps.sumOf { it.foregroundMs7d }}")
+        apps.take(5).forEach { app ->
+            add(simplifyPackage(app.packageName) to "fg=${app.foregroundMs7d}ms d=${app.baselineDeltaMs}")
+        }
+    }
+    InsightCardShell(title = "App Attention (7d)", icon = Icons.Default.Smartphone, accent = insightAccentForTitle("App Attention (7d)"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         val maxMs = apps.maxOf { it.foregroundMs7d }.coerceAtLeast(1)
 
         apps.forEachIndexed { i, app ->
@@ -1332,7 +1435,15 @@ private fun AppAttentionCard(apps: List<AppAttention>, meta: InsightMeta? = null
 private fun AnomalyCard(anomaly: Anomaly, onDismiss: () -> Unit) {
     val expansionCommand = LocalCardExpansionCommand.current
     var infoExpanded by rememberSaveable(anomaly.id) { mutableStateOf(false) }
+    var dataExpanded by rememberSaveable("${anomaly.id}:data") { mutableStateOf(false) }
     var collapsed by rememberSaveable("${anomaly.id}:collapsed") { mutableStateOf(true) }
+    val anomalySnapshot = listOf(
+        "id" to anomaly.id,
+        "title" to anomaly.title,
+        "timestamp_ms" to "${anomaly.timestamp}",
+        "age" to relativeTime(anomaly.timestamp),
+        "description" to anomaly.description
+    )
     LaunchedEffect(expansionCommand.version) {
         collapsed = expansionCommand.collapsed
     }
@@ -1389,11 +1500,33 @@ private fun AnomalyCard(anomaly: Anomaly, onDismiss: () -> Unit) {
                         EducationalInfoPanel(
                             text = educationalInfoForTitle("Anomaly Feed"),
                             whyMatters = whyMattersForTitle("Anomaly Feed"),
+                            algorithm = algorithmForTitle("Anomaly Feed"),
+                            accent = TerminalAmber,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+                    if (dataExpanded) {
+                        DataSnapshotPanel(
+                            rows = anomalySnapshot,
                             accent = TerminalAmber,
                             modifier = Modifier.padding(top = 8.dp)
                         )
                     }
                 }
+            }
+            IconButton(
+                onClick = {
+                    dataExpanded = !dataExpanded
+                    if (dataExpanded) collapsed = false
+                },
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.HelpOutline,
+                    "Show data for anomaly",
+                    tint = if (dataExpanded) TerminalBlue else DimGray,
+                    modifier = Modifier.size(16.dp)
+                )
             }
             IconButton(
                 onClick = {
@@ -1427,7 +1560,14 @@ private fun LocationMapCard(
 ) {
     var renaming by remember { mutableStateOf<LocationCluster?>(null) }
 
-    InsightCardShell(title = "Location Clusters", icon = Icons.Default.LocationOn, accent = insightAccentForTitle("Location Clusters"), meta = meta, showDiagnostics = showDiagnostics) {
+    val locationSnapshot = buildList {
+        add("clusters" to "${clusters.size}")
+        add("total_fixes" to "${clusters.sumOf { it.fixCount }}")
+        clusters.take(5).forEach { c ->
+            add((c.name ?: c.id) to "lat=${"%.4f".format(c.lat)} lon=${"%.4f".format(c.lon)} fixes=${c.fixCount}")
+        }
+    }
+    InsightCardShell(title = "Location Clusters", icon = Icons.Default.LocationOn, accent = insightAccentForTitle("Location Clusters"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = locationSnapshot) {
         if (clusters.size >= 2) {
             val minLat = clusters.minOf { it.lat }
             val maxLat = clusters.maxOf { it.lat }
@@ -1582,12 +1722,20 @@ private fun LocationMapCard(
 
 @Composable
 private fun UnlockLatencyCard(latencies: List<UnlockLatency>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    val snapshot = buildList {
+        add("apps_with_responses" to "${latencies.size}")
+        add("total_samples" to "${latencies.sumOf { it.sampleCount }}")
+        latencies.take(5).forEach { e ->
+            add(simplifyPackage(e.packageName) to "median=${e.medianLatencyMs}ms n=${e.sampleCount}")
+        }
+    }
     InsightCardShell(
         title = "Unlock After Notification",
         icon = Icons.Default.Notifications,
         accent = insightAccentForTitle("Unlock After Notification"),
         meta = meta,
-        showDiagnostics = showDiagnostics
+        showDiagnostics = showDiagnostics,
+        dataSnapshot = snapshot
     ) {
         Text(
             "Median time from notification to screen unlock (7d)",
@@ -1645,7 +1793,14 @@ private fun UnlockLatencyCard(latencies: List<UnlockLatency>, meta: InsightMeta?
 
 @Composable
 private fun FingerprintStabilityCard(fields: List<FingerprintField>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Fingerprint Stability", icon = Icons.Default.Fingerprint, accent = insightAccentForTitle("Fingerprint Stability"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = buildList {
+        add("fields_tracked" to "${fields.size}")
+        add("recently_changed" to "${fields.count { it.lastChangedMs != null }}")
+        fields.take(8).forEach { f ->
+            add(f.label to f.currentValue)
+        }
+    }
+    InsightCardShell(title = "Fingerprint Stability", icon = Icons.Default.Fingerprint, accent = insightAccentForTitle("Fingerprint Stability"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         Text(
             "Device identity fields and when they last changed",
             fontSize = 10.sp,
@@ -1704,7 +1859,13 @@ private fun FingerprintStabilityCard(fields: List<FingerprintField>, meta: Insig
 
 @Composable
 private fun MonthlyTrendsCard(trends: List<MonthlyTrend>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Monthly Trends", icon = Icons.Default.Timeline, accent = insightAccentForTitle("Monthly Trends"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = buildList {
+        add("months" to "${trends.size}")
+        trends.takeLast(6).forEach { t ->
+            add(t.month to "unl/d=${"%.1f".format(t.avgDailyUnlocks)} steps=${t.totalSteps}")
+        }
+    }
+    InsightCardShell(title = "Monthly Trends", icon = Icons.Default.Timeline, accent = insightAccentForTitle("Monthly Trends"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         Text(
             "Month-over-month behavioral comparison",
             fontSize = 10.sp,
@@ -1783,7 +1944,16 @@ private fun MonthlyTrendsCard(trends: List<MonthlyTrend>, meta: InsightMeta? = n
 
 @Composable
 private fun EngagementCard(data: EngagementScore, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Engagement Score", icon = Icons.Default.Speed, accent = insightAccentForTitle("Engagement Score"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = listOf(
+        "dau_wau_ratio" to "%.3f".format(data.dauWauRatio),
+        "avg_sessions_per_day" to "%.2f".format(data.avgSessionsPerDay),
+        "avg_session_duration_ms" to "${data.avgSessionDurationMs}",
+        "total_sessions_7d" to "${data.totalSessions7d}",
+        "active_days_7d" to "${data.activeDays7d}",
+        "retention_day_7" to "${data.retentionDay7}",
+        "retention_day_30" to "${data.retentionDay30}"
+    )
+    InsightCardShell(title = "Engagement Score", icon = Icons.Default.Speed, accent = insightAccentForTitle("Engagement Score"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         Text(
             "Firebase-style engagement metrics (7d)",
             fontSize = 10.sp,
@@ -1902,7 +2072,17 @@ private fun RetentionBadge(label: String, active: Boolean) {
 
 @Composable
 private fun PrivacyRadarCard(entries: List<PrivacyRadarEntry>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Privacy Radar", icon = Icons.Default.Shield, accent = insightAccentForTitle("Privacy Radar"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = buildList {
+        add("apps_with_access" to "${entries.size}")
+        add("camera_total" to "${entries.sumOf { it.cameraAccesses }}")
+        add("mic_total" to "${entries.sumOf { it.micAccesses }}")
+        add("location_total" to "${entries.sumOf { it.locationAccesses }}")
+        add("contact_total" to "${entries.sumOf { it.contactAccesses }}")
+        entries.take(5).forEach { e ->
+            add(simplifyPackage(e.packageName) to "score=${e.privacyScore} cam=${e.cameraAccesses} mic=${e.micAccesses} loc=${e.locationAccesses}")
+        }
+    }
+    InsightCardShell(title = "Privacy Radar", icon = Icons.Default.Shield, accent = insightAccentForTitle("Privacy Radar"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         Text(
             "Per-app privacy invasion score from AppOps audit",
             fontSize = 10.sp,
@@ -1975,7 +2155,17 @@ private fun AccessBadge(label: String, count: Int) {
 
 @Composable
 private fun DataFlowCard(entries: List<DataFlowEntry>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Data Flow", icon = Icons.Default.SwapVert, accent = insightAccentForTitle("Data Flow"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = buildList {
+        add("apps_with_traffic" to "${entries.size}")
+        add("total_bytes" to "${entries.sumOf { it.totalBytes }}")
+        add("total_tx" to "${entries.sumOf { it.txBytes }}")
+        add("total_rx" to "${entries.sumOf { it.rxBytes }}")
+        add("suspicious_count" to "${entries.count { it.isSuspicious }}")
+        entries.take(5).forEach { e ->
+            add(simplifyPackage(e.packageName) to "tx=${e.txBytes} rx=${e.rxBytes} ratio=${"%.2f".format(e.txRxRatio)}")
+        }
+    }
+    InsightCardShell(title = "Data Flow", icon = Icons.Default.SwapVert, accent = insightAccentForTitle("Data Flow"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         Text(
             "Per-app network usage (24h) — flagged if TX/RX > 3x",
             fontSize = 10.sp,
@@ -2065,7 +2255,14 @@ private fun DataFlowCard(entries: List<DataFlowEntry>, meta: InsightMeta? = null
 
 @Composable
 private fun AppCompulsionCard(apps: List<AppCompulsion>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "App Compulsion Index", icon = Icons.Default.Repeat, accent = insightAccentForTitle("App Compulsion Index"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = buildList {
+        add("apps_tracked" to "${apps.size}")
+        add("total_launches" to "${apps.sumOf { it.launchCount }}")
+        apps.take(5).forEach { a ->
+            add(simplifyPackage(a.packageName) to "launches=${a.launchCount} avg_gap=${"%.1f".format(a.avgGapMinutes)}m")
+        }
+    }
+    InsightCardShell(title = "App Compulsion Index", icon = Icons.Default.Repeat, accent = insightAccentForTitle("App Compulsion Index"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         Text(
             "Most-launched apps by frequency (7d logcat)",
             fontSize = 10.sp,
@@ -2133,7 +2330,17 @@ private fun AppCompulsionCard(apps: List<AppCompulsion>, meta: InsightMeta? = nu
 
 @Composable
 private fun DeviceHealthCard(health: DeviceHealth, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Device Health", icon = Icons.Default.Memory, accent = insightAccentForTitle("Device Health"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = listOf(
+        "ram_used_pct" to "%.1f".format(health.ramUsedPct),
+        "process_count" to "${health.processCount}",
+        "foreground_count" to "${health.foregroundCount}",
+        "background_count" to "${health.backgroundCount}",
+        "thermal_status" to health.thermalStatus,
+        "uptime_hours" to "%.1f".format(health.uptimeHours),
+        "memory_trend_24h" to "%.2f".format(health.memoryTrend),
+        "process_counts_trusted" to "${health.processCountsTrusted}"
+    )
+    InsightCardShell(title = "Device Health", icon = Icons.Default.Memory, accent = insightAccentForTitle("Device Health"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         // RAM gauge
         val hasRamData = health.ramUsedPct > 0.0
         val ramColor = when {
@@ -2248,7 +2455,14 @@ private fun DeviceHealthCard(health: DeviceHealth, meta: InsightMeta? = null, sh
 
 @Composable
 private fun IdentityEntropyCard(entropy: IdentityEntropy, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Identity Entropy", icon = Icons.Default.Fingerprint, accent = insightAccentForTitle("Identity Entropy"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = buildList {
+        add("total_bits" to "%.2f".format(entropy.totalBits))
+        add("fields" to "${entropy.fields.size}")
+        entropy.fields.take(8).forEach { f ->
+            add(f.name to "${f.value} (${"%.2f".format(f.entropyBits)} bits)")
+        }
+    }
+    InsightCardShell(title = "Identity Entropy", icon = Icons.Default.Fingerprint, accent = insightAccentForTitle("Identity Entropy"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         Text(
             "Fingerprint uniqueness quantified in bits of entropy",
             fontSize = 10.sp,
@@ -2360,7 +2574,14 @@ private fun IdentityEntropyCard(entropy: IdentityEntropy, meta: InsightMeta? = n
 
 @Composable
 private fun HomeWorkCard(data: HomeWorkInference, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Home & Work", icon = Icons.Default.Home, accent = insightAccentForTitle("Home & Work"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = listOf(
+        "home_cluster" to (data.homeCluster?.let { "${it.name ?: it.id} fixes=${it.fixCount}" } ?: "n/a"),
+        "work_cluster" to (data.workCluster?.let { "${it.name ?: it.id} fixes=${it.fixCount}" } ?: "n/a"),
+        "commute_distance_km" to (data.commuteDistanceKm?.let { "%.2f".format(it) } ?: "n/a"),
+        "avg_commute_start_hr" to (data.avgCommuteStartHour?.let { "%.2f".format(it) } ?: "n/a"),
+        "avg_commute_end_hr" to (data.avgCommuteEndHour?.let { "%.2f".format(it) } ?: "n/a")
+    )
+    InsightCardShell(title = "Home & Work", icon = Icons.Default.Home, accent = insightAccentForTitle("Home & Work"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         Text(
             "Location-based home/work inference from GPS clusters",
             fontSize = 10.sp,
@@ -2445,7 +2666,14 @@ private fun HomeWorkCard(data: HomeWorkInference, meta: InsightMeta? = null, sho
 
 @Composable
 private fun CircadianCard(data: CircadianProfile, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Circadian Rhythm", icon = Icons.Default.WbSunny, accent = insightAccentForTitle("Circadian Rhythm"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = listOf(
+        "peak_hour" to "${data.peakHour}",
+        "trough_hour" to "${data.troughHour}",
+        "chronotype" to data.chronotype,
+        "activity_spread_hrs" to "%.2f".format(data.activitySpreadHrs),
+        "hourly_unlocks" to data.hourlyUnlocks.joinToString(",")
+    )
+    InsightCardShell(title = "Circadian Rhythm", icon = Icons.Default.WbSunny, accent = insightAccentForTitle("Circadian Rhythm"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         val chronoLabel = when (data.chronotype) {
             "early_bird" -> "Early Bird"
             "night_owl" -> "Night Owl"
@@ -2531,7 +2759,14 @@ private fun CircadianCard(data: CircadianProfile, meta: InsightMeta? = null, sho
 
 @Composable
 private fun RoutineCard(data: RoutinePredictability, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Routine Predictability", icon = Icons.Default.Schedule, accent = insightAccentForTitle("Routine Predictability"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = listOf(
+        "overall_score" to "%.3f".format(data.overallScore),
+        "most_predictable_hour" to "${data.mostPredictableHour}",
+        "least_predictable_hour" to "${data.leastPredictableHour}",
+        "weekday_vs_weekend_shift" to "%.3f".format(data.weekdayVsWeekendShift),
+        "hourly_entropy_bits" to data.hourlyEntropy.joinToString(",") { "%.2f".format(it) }
+    )
+    InsightCardShell(title = "Routine Predictability", icon = Icons.Default.Schedule, accent = insightAccentForTitle("Routine Predictability"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         val pctScore = (data.overallScore * 100).toInt()
         val routineLabel = when {
             pctScore >= 80 -> "Clockwork"
@@ -2611,7 +2846,14 @@ private fun RoutineCard(data: RoutinePredictability, meta: InsightMeta? = null, 
 
 @Composable
 private fun SocialPressureCard(entries: List<SocialPressureEntry>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Social Pressure", icon = Icons.Default.Notifications, accent = insightAccentForTitle("Social Pressure"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = buildList {
+        add("apps_with_pressure" to "${entries.size}")
+        add("total_notifications" to "${entries.sumOf { it.notificationCount }}")
+        entries.take(5).forEach { e ->
+            add(simplifyPackage(e.packageName) to "n=${e.notificationCount} resp=${"%.2f".format(e.responseRate)} med_ms=${e.medianResponseMs}")
+        }
+    }
+    InsightCardShell(title = "Social Pressure", icon = Icons.Default.Notifications, accent = insightAccentForTitle("Social Pressure"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         Text(
             "Apps that trigger the fastest phone pickups",
             fontSize = 10.sp,
@@ -2676,7 +2918,18 @@ private fun SocialPressureCard(entries: List<SocialPressureEntry>, meta: Insight
 
 @Composable
 private fun AppPortfolioCard(data: AppPortfolioProfile, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "App Portfolio", icon = Icons.Default.Apps, accent = insightAccentForTitle("App Portfolio"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = buildList {
+        add("total_apps" to "${data.totalApps}")
+        add("system_apps" to "${data.systemApps}")
+        add("user_apps" to "${data.userApps}")
+        data.categories.entries.sortedByDescending { it.value }.take(8).forEach { (cat, count) ->
+            add("cat_$cat" to "$count")
+        }
+        if (data.inferences.isNotEmpty()) {
+            add("inferences" to data.inferences.joinToString(","))
+        }
+    }
+    InsightCardShell(title = "App Portfolio", icon = Icons.Default.Apps, accent = insightAccentForTitle("App Portfolio"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         Text(
             "Installed app analysis and demographic inference",
             fontSize = 10.sp,
@@ -2758,7 +3011,14 @@ private fun AppPortfolioCard(data: AppPortfolioProfile, meta: InsightMeta? = nul
 
 @Composable
 private fun ChargingCard(data: ChargingBehavior, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Charging Behavior", icon = Icons.Default.BatteryChargingFull, accent = insightAccentForTitle("Charging Behavior"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = listOf(
+        "avg_charges_per_day" to "%.2f".format(data.avgChargesPerDay),
+        "avg_discharge_depth_pct" to "%.1f".format(data.avgDischargeDepthPct),
+        "overnight_charger" to "${data.overnightCharger}",
+        "avg_charge_duration_ms" to "${data.avgChargeDurationMs}",
+        "typical_charge_hour" to "${data.typicalChargeHour}"
+    )
+    InsightCardShell(title = "Charging Behavior", icon = Icons.Default.BatteryChargingFull, accent = insightAccentForTitle("Charging Behavior"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         Text(
             "Battery charging patterns and habits",
             fontSize = 10.sp,
@@ -2833,7 +3093,16 @@ private fun ChargingCard(data: ChargingBehavior, meta: InsightMeta? = null, show
 
 @Composable
 private fun WiFiCard(data: WiFiFootprint, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "WiFi Footprint", icon = Icons.Default.Wifi, accent = insightAccentForTitle("WiFi Footprint"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = buildList {
+        add("unique_networks_7d" to "${data.uniqueNetworks7d}")
+        add("total_scans" to "${data.totalScans}")
+        add("mobility_score" to "%.3f".format(data.mobilityScore))
+        add("home_network" to (data.homeNetwork ?: "n/a"))
+        data.topNetworks.take(5).forEach { (ssid, n) ->
+            add("ssid_$ssid" to "$n")
+        }
+    }
+    InsightCardShell(title = "WiFi Footprint", icon = Icons.Default.Wifi, accent = insightAccentForTitle("WiFi Footprint"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         Text(
             "Network mobility and location inference via WiFi",
             fontSize = 10.sp,
@@ -2931,7 +3200,14 @@ private fun WiFiCard(data: WiFiFootprint, meta: InsightMeta? = null, showDiagnos
 
 @Composable
 private fun FragmentationCard(data: SessionFragmentation, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Session Fragmentation", icon = Icons.Default.DataUsage, accent = insightAccentForTitle("Session Fragmentation"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = listOf(
+        "avg_switches_per_session" to "%.2f".format(data.avgSwitchesPerSession),
+        "avg_session_depth_ms" to "${data.avgSessionDepthMs}",
+        "most_fragmented_hour" to "${data.mostFragmentedHour}",
+        "least_fragmented_hour" to "${data.leastFragmentedHour}",
+        "attention_score" to "%.3f".format(data.attentionScore)
+    )
+    InsightCardShell(title = "Session Fragmentation", icon = Icons.Default.DataUsage, accent = insightAccentForTitle("Session Fragmentation"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         val attentionLabel = when {
             data.attentionScore >= 0.8 -> "Deep focus"
             data.attentionScore >= 0.6 -> "Moderate focus"
@@ -3015,7 +3291,15 @@ private fun FragmentationCard(data: SessionFragmentation, meta: InsightMeta? = n
 
 @Composable
 private fun DwellTimeCard(entries: List<DwellTimeEntry>, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Dwell Times", icon = Icons.Default.Place, accent = insightAccentForTitle("Dwell Times"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = buildList {
+        add("clusters_with_dwell" to "${entries.size}")
+        add("total_dwell_ms" to "${entries.sumOf { it.totalDwellMs }}")
+        add("total_visits" to "${entries.sumOf { it.visitCount }}")
+        entries.take(5).forEach { e ->
+            add((e.clusterName ?: e.clusterId) to "dwell=${e.totalDwellMs}ms visits=${e.visitCount} class=${e.classification}")
+        }
+    }
+    InsightCardShell(title = "Dwell Times", icon = Icons.Default.Place, accent = insightAccentForTitle("Dwell Times"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         Text(
             "Time spent at each location cluster",
             fontSize = 10.sp,
@@ -3101,7 +3385,16 @@ private fun DwellTimeCard(entries: List<DwellTimeEntry>, meta: InsightMeta? = nu
 
 @Composable
 private fun WeekdayWeekendCard(data: WeekdayWeekendDelta, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Weekday vs Weekend", icon = Icons.Default.CalendarMonth, accent = insightAccentForTitle("Weekday vs Weekend"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = listOf(
+        "weekday_avg_unlocks" to "%.2f".format(data.weekdayAvgUnlocks),
+        "weekend_avg_unlocks" to "%.2f".format(data.weekendAvgUnlocks),
+        "weekday_avg_screen_ms" to "${data.weekdayAvgScreenMs}",
+        "weekend_avg_screen_ms" to "${data.weekendAvgScreenMs}",
+        "weekday_top_apps" to data.weekdayTopApps.joinToString(",") { simplifyPackage(it) },
+        "weekend_top_apps" to data.weekendTopApps.joinToString(",") { simplifyPackage(it) },
+        "balance_score" to "%.3f".format(data.balanceScore)
+    )
+    InsightCardShell(title = "Weekday vs Weekend", icon = Icons.Default.CalendarMonth, accent = insightAccentForTitle("Weekday vs Weekend"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         val balanceLabel = when {
             data.balanceScore >= 0.8 -> "Very different"
             data.balanceScore >= 0.5 -> "Noticeably different"
@@ -3179,7 +3472,14 @@ private fun WeekdayWeekendCard(data: WeekdayWeekendDelta, meta: InsightMeta? = n
 
 @Composable
 private fun IncomeCard(data: IncomeInference, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Income Inference", icon = Icons.Default.AttachMoney, accent = insightAccentForTitle("Income Inference"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = listOf(
+        "device_tier" to data.deviceTier,
+        "estimated_device_price_usd" to "${data.estimatedDevicePrice}",
+        "carrier_tier" to data.carrierTier,
+        "app_signals" to data.appSignals.joinToString(","),
+        "overall_tier" to data.overallTier
+    )
+    InsightCardShell(title = "Income Inference", icon = Icons.Default.AttachMoney, accent = insightAccentForTitle("Income Inference"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         Text(
             "Socioeconomic signals from device + apps + carrier",
             fontSize = 10.sp,
@@ -3247,7 +3547,15 @@ private fun IncomeCard(data: IncomeInference, meta: InsightMeta? = null, showDia
 
 @Composable
 private fun CommuteCard(data: CommutePattern, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Commute Pattern", icon = Icons.Default.DirectionsCar, accent = insightAccentForTitle("Commute Pattern"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = listOf(
+        "detected" to "${data.detected}",
+        "avg_departure_hour" to "%.2f".format(data.avgDepartureHour),
+        "avg_return_hour" to "%.2f".format(data.avgReturnHour),
+        "avg_duration_minutes" to "%.2f".format(data.avgDurationMinutes),
+        "transport_mode" to data.transportMode,
+        "consistency_score" to "%.3f".format(data.consistencyScore)
+    )
+    InsightCardShell(title = "Commute Pattern", icon = Icons.Default.DirectionsCar, accent = insightAccentForTitle("Commute Pattern"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         Text(
             "Daily commute inference from location transitions",
             fontSize = 10.sp,
@@ -3309,6 +3617,683 @@ private fun CommuteCard(data: CommutePattern, meta: InsightMeta? = null, showDia
     }
 }
 
+// ── Card 26: Travel Profile ────────────────────────────────────────
+
+@Composable
+private fun TravelProfileCard(data: TravelProfile, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    val snapshot = listOf(
+        "countries_seen_30d" to data.countriesSeen30d.joinToString(","),
+        "is_currently_roaming" to "${data.isCurrentlyRoaming}",
+        "public_ip_changes_7d" to "${data.publicIpChanges7d}",
+        "gps_clusters_far_from_home" to "${data.gpsClustersFarFromHome}",
+        "median_trip_radius_km" to "%.2f".format(data.medianTripRadiusKm),
+        "photo_locations_30d" to "${data.photoLocations30d}",
+        "travel_score" to "%.3f".format(data.travelScore)
+    )
+    InsightCardShell(title = "Travel Profile", icon = Icons.Default.Public, accent = insightAccentForTitle("Travel Profile"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
+        val scoreColor = when {
+            data.travelScore >= 0.7 -> TerminalPurple
+            data.travelScore >= 0.35 -> TerminalBlue
+            else -> TerminalGreen
+        }
+        val label = when {
+            data.travelScore >= 0.7 -> "frequent movement"
+            data.travelScore >= 0.35 -> "some travel"
+            else -> "mostly local"
+        }
+        ScoreHeader("travel score", label, data.travelScore, scoreColor)
+
+        Spacer(Modifier.height(10.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            StatCell(Icons.Default.Public, "${data.countriesSeen30d.size}", "countries")
+            StatCell(Icons.Default.NetworkCheck, "${data.publicIpChanges7d}", "ip shifts")
+            StatCell(Icons.Default.LocationOn, "${data.gpsClustersFarFromHome}", "far places")
+        }
+
+        Spacer(Modifier.height(8.dp))
+        HorizontalDivider(color = DimGray.copy(alpha = 0.3f))
+        Spacer(Modifier.height(8.dp))
+
+        CompactValueRow("roaming", if (data.isCurrentlyRoaming) "yes" else "no", if (data.isCurrentlyRoaming) TerminalAmber else DimGray)
+        CompactValueRow("median trip radius", "${"%.1f".format(data.medianTripRadiusKm)} km", TerminalBlue)
+        CompactValueRow("photo locations", "${data.photoLocations30d}", TerminalPurple)
+        if (data.countriesSeen30d.isNotEmpty()) {
+            CompactValueRow("country trail", data.countriesSeen30d.take(6).joinToString(", "), TerminalGreen)
+        }
+    }
+}
+
+// ── Card 27: Social Graph ──────────────────────────────────────────
+
+@Composable
+private fun SocialGraphCard(data: SocialGraphProfile, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    val snapshot = listOf(
+        "hashed_contacts" to "${data.hashedContacts}",
+        "unique_notification_senders_7d" to "${data.uniqueNotificationSenders7d}",
+        "unique_call_counterparts_30d" to "${data.uniqueCallCounterparts30d}",
+        "unique_sms_senders_30d" to "${data.uniqueSmsSenders30d}",
+        "calendar_attendees_per_event_avg" to "%.2f".format(data.calendarAttendeesPerEventAvg),
+        "total_connections" to "${data.totalConnections}",
+        "social_breadth" to data.socialBreadth
+    )
+    InsightCardShell(title = "Social Graph", icon = Icons.Default.Forum, accent = insightAccentForTitle("Social Graph"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
+        val breadthColor = when (data.socialBreadth) {
+            "broad" -> TerminalPurple
+            "moderate" -> TerminalBlue
+            "small" -> TerminalAmber
+            else -> DimGray
+        }
+        ScoreHeader(
+            label = "relationship breadth",
+            value = data.socialBreadth.replace('_', ' '),
+            score = (data.totalConnections / 500.0).coerceIn(0.0, 1.0),
+            color = breadthColor
+        )
+
+        Spacer(Modifier.height(10.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            StatCell(Icons.Default.Person, formatLargeNumber(data.hashedContacts), "contacts")
+            StatCell(Icons.Default.Notifications, "${data.uniqueNotificationSenders7d}", "notif senders")
+            StatCell(Icons.Default.Forum, "${data.totalConnections}", "connections")
+        }
+
+        Spacer(Modifier.height(8.dp))
+        HorizontalDivider(color = DimGray.copy(alpha = 0.3f))
+        Spacer(Modifier.height(8.dp))
+        CompactValueRow("call counterparts", "${data.uniqueCallCounterparts30d}", TerminalGreen)
+        CompactValueRow("sms senders", "${data.uniqueSmsSenders30d}", TerminalBlue)
+        CompactValueRow("calendar attendee proxy", "%.1f/event".format(data.calendarAttendeesPerEventAvg), TerminalPurple)
+    }
+}
+
+// ── Card 28: Activity Profile ──────────────────────────────────────
+
+@Composable
+private fun ActivityProfileCard(data: ActivityProfile, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    val snapshot = listOf(
+        "sample_count" to "${data.sampleCount}",
+        "percent_still" to "%.1f".format(data.percentStill * 100),
+        "percent_walking" to "%.1f".format(data.percentWalking * 100),
+        "percent_running" to "%.1f".format(data.percentRunning * 100),
+        "percent_vehicle" to "%.1f".format(data.percentVehicle * 100),
+        "percent_bicycle" to "%.1f".format(data.percentBicycle * 100),
+        "avg_confidence" to "%.2f".format(data.avgConfidence),
+        "movement_index" to "%.3f".format(data.movementIndex)
+    )
+    InsightCardShell(title = "Activity Profile", icon = Icons.Default.DirectionsCar, accent = insightAccentForTitle("Activity Profile"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
+        val movementColor = when {
+            data.movementIndex >= 0.7 -> TerminalGreen
+            data.movementIndex >= 0.35 -> TerminalBlue
+            else -> TerminalAmber
+        }
+        ScoreHeader(
+            label = "movement index",
+            value = "${"%.0f".format(data.movementIndex * 100)}%",
+            score = data.movementIndex,
+            color = movementColor
+        )
+
+        Spacer(Modifier.height(10.dp))
+        PercentageRow("still", data.percentStill, TerminalAmber)
+        PercentageRow("walking", data.percentWalking, TerminalGreen)
+        PercentageRow("running", data.percentRunning, TerminalRed)
+        PercentageRow("vehicle", data.percentVehicle, TerminalBlue)
+        PercentageRow("bicycle", data.percentBicycle, TerminalPurple)
+
+        Spacer(Modifier.height(8.dp))
+        CompactValueRow("samples", "${data.sampleCount}", DimGray)
+        CompactValueRow("avg confidence", "${"%.0f".format(data.avgConfidence * 100)}%", TerminalBlue)
+    }
+}
+
+// ── Card 29: Heart Rate ────────────────────────────────────────────
+
+@Composable
+private fun HeartRateCard(data: HeartRateProfile, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    val snapshot = listOf(
+        "sample_count" to "${data.sampleCount}",
+        "resting_bpm_estimate" to "%.1f".format(data.restingBpmEstimate),
+        "median_bpm" to "%.1f".format(data.medianBpm),
+        "peak_bpm" to "%.1f".format(data.peakBpm),
+        "percent_exertion" to "%.1f".format(data.percentExertion * 100),
+        "recovery_window_minutes" to "%.2f".format(data.recoveryWindowMinutes),
+        "newest_sample_ms" to "${data.newestSampleMs}"
+    )
+    InsightCardShell(title = "Heart Rate", icon = Icons.Default.Favorite, accent = insightAccentForTitle("Heart Rate"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
+        Text(
+            "Not a medical reading; mirrors sensor-derived exertion patterns only.",
+            fontSize = 10.sp,
+            color = DimGray
+        )
+        Spacer(Modifier.height(8.dp))
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            StatCell(Icons.Default.Favorite, "${"%.0f".format(data.restingBpmEstimate)}", "resting")
+            StatCell(Icons.Default.Timeline, "${"%.0f".format(data.medianBpm)}", "median")
+            StatCell(Icons.Default.Speed, "${"%.0f".format(data.peakBpm)}", "peak")
+        }
+
+        Spacer(Modifier.height(10.dp))
+        PercentageRow("exertion share", data.percentExertion, TerminalRed)
+        CompactValueRow("recovery window", "${"%.0f".format(data.recoveryWindowMinutes)} min", TerminalBlue)
+        CompactValueRow("samples", "${data.sampleCount}", DimGray)
+        if (data.newestSampleMs > 0) {
+            CompactValueRow("latest", relativeTime(data.newestSampleMs), TerminalGreen)
+        }
+    }
+}
+
+// ── Card 30: Bluetooth Ecosystem ───────────────────────────────────
+
+@Composable
+private fun BluetoothEcosystemCard(data: BluetoothEcosystem, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    val snapshot = buildList {
+        add("paired_count" to "${data.pairedCount}")
+        add("avg_scan_count" to "%.2f".format(data.avgScanCount))
+        add("total_unique_scanned_devices_7d" to "${data.totalUniqueScannedDevices7d}")
+        add("ecosystem_label" to data.ecosystemLabel)
+        data.pairedBrands.take(5).forEach { (brand, count) ->
+            add("brand_$brand" to "$count")
+        }
+    }
+    InsightCardShell(title = "Bluetooth Ecosystem", icon = Icons.Default.Bluetooth, accent = insightAccentForTitle("Bluetooth Ecosystem"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
+        val labelColor = when {
+            data.ecosystemLabel.contains("apple") -> TerminalPurple
+            data.ecosystemLabel.contains("samsung") -> TerminalBlue
+            data.ecosystemLabel == "mixed" -> TerminalGreen
+            else -> TerminalAmber
+        }
+        Text(
+            data.ecosystemLabel.replace('_', ' '),
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            color = labelColor
+        )
+        Text("paired and nearby device fingerprint", fontSize = 10.sp, color = DimGray)
+
+        Spacer(Modifier.height(10.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            StatCell(Icons.Default.Bluetooth, "${data.pairedCount}", "paired")
+            StatCell(Icons.Default.Sensors, "${data.totalUniqueScannedDevices7d}", "nearby")
+            StatCell(Icons.Default.NetworkCheck, "${"%.1f".format(data.avgScanCount)}", "avg scan")
+        }
+
+        if (data.pairedBrands.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            HorizontalDivider(color = DimGray.copy(alpha = 0.3f))
+            Spacer(Modifier.height(8.dp))
+            val maxBrand = data.pairedBrands.maxOf { it.second }.coerceAtLeast(1)
+            data.pairedBrands.forEach { (brand, count) ->
+                CountBarRow(brand, count, maxBrand, TerminalPurple)
+            }
+        }
+    }
+}
+
+// ── Card 31: Calendar Density ──────────────────────────────────────
+
+@Composable
+private fun CalendarDensityCard(data: CalendarDensity, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    val snapshot = listOf(
+        "events_30d" to "${data.events30d}",
+        "events_this_week" to "${data.eventsThisWeek}",
+        "avg_events_per_workday" to "%.2f".format(data.avgEventsPerWorkday),
+        "recurring_events" to "${data.recurringEvents}",
+        "median_event_duration_min" to "%.1f".format(data.medianEventDurationMin),
+        "back_to_back_percent" to "%.2f".format(data.backToBackPercent),
+        "latest_event_title_hash" to (data.latestEventTitleHash ?: "—")
+    )
+    InsightCardShell(title = "Calendar Density", icon = Icons.Default.CalendarMonth, accent = insightAccentForTitle("Calendar Density"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
+        val densityScore = (data.avgEventsPerWorkday / 8.0).coerceIn(0.0, 1.0)
+        val densityColor = when {
+            densityScore >= 0.75 -> TerminalRed
+            densityScore >= 0.4 -> TerminalAmber
+            else -> TerminalGreen
+        }
+        ScoreHeader(
+            label = "workday load",
+            value = "${"%.1f".format(data.avgEventsPerWorkday)}/day",
+            score = densityScore,
+            color = densityColor
+        )
+
+        Spacer(Modifier.height(10.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            StatCell(Icons.Default.CalendarMonth, "${data.events30d}", "30d events")
+            StatCell(Icons.Default.Schedule, "${data.eventsThisWeek}", "this week")
+            StatCell(Icons.Default.Repeat, "${data.recurringEvents}", "recurring")
+        }
+
+        Spacer(Modifier.height(8.dp))
+        PercentageRow("back-to-back", data.backToBackPercent, TerminalRed)
+        CompactValueRow("median duration", "${"%.0f".format(data.medianEventDurationMin)} min", TerminalBlue)
+        data.latestEventTitleHash?.takeIf { it.isNotBlank() }?.let {
+            CompactValueRow("latest title hash", it, DimGray)
+        }
+    }
+}
+
+// ── Card 32: Photo Activity ────────────────────────────────────────
+
+@Composable
+private fun PhotoActivityCard(data: PhotoActivity, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    val snapshot = listOf(
+        "photos_30d" to "${data.photos30d}",
+        "photos_last_7d" to "${data.photosLast7d}",
+        "distinct_locations_30d" to "${data.distinctLocations30d}",
+        "photos_with_gps" to "${data.photosWithGps}",
+        "photos_without_gps" to "${data.photosWithoutGps}",
+        "camera_diversity" to "${data.cameraDiversity}",
+        "activity_hour_mode" to "${data.activityHourMode}"
+    )
+    InsightCardShell(title = "Photo Activity", icon = Icons.Default.PhotoCamera, accent = insightAccentForTitle("Photo Activity"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
+        val gpsShare = if (data.photos30d > 0) data.photosWithGps.toDouble() / data.photos30d else 0.0
+        ScoreHeader(
+            label = "photo gps coverage",
+            value = "${"%.0f".format(gpsShare * 100)}%",
+            score = gpsShare,
+            color = if (gpsShare >= 0.5) TerminalPurple else TerminalAmber
+        )
+
+        Spacer(Modifier.height(10.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            StatCell(Icons.Default.PhotoCamera, "${data.photos30d}", "photos 30d")
+            StatCell(Icons.Default.Timeline, "${data.photosLast7d}", "last 7d")
+            StatCell(Icons.Default.LocationOn, "${data.distinctLocations30d}", "places")
+        }
+
+        Spacer(Modifier.height(8.dp))
+        CompactValueRow("gps / no gps", "${data.photosWithGps} / ${data.photosWithoutGps}", TerminalBlue)
+        CompactValueRow("camera diversity", "${data.cameraDiversity}", TerminalGreen)
+        CompactValueRow("common hour", formatHour(data.activityHourMode.toDouble()), TerminalAmber)
+    }
+}
+
+// ── Card 33: Notification Heatmap ──────────────────────────────────
+
+@Composable
+private fun NotificationStressCard(data: NotificationStress, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    val snapshot = buildList {
+        add("total_7d" to "${data.total7d}")
+        add("per_hour_avg" to "%.2f".format(data.perHourAvg))
+        add("late_night_share" to "%.3f".format(data.lateNightShare))
+        add("work_hours_share" to "%.3f".format(data.workHoursShare))
+        add("max_cell_count" to "${data.maxCellCount}")
+        add("stress_label" to data.stressLabel)
+        data.topInterrupters.take(5).forEach { (pkg, count) ->
+            add("top_$pkg" to "$count")
+        }
+    }
+    InsightCardShell(title = "Notification Heatmap", icon = Icons.Default.Notifications, accent = insightAccentForTitle("Notification Heatmap"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
+        val stressColor = when (data.stressLabel) {
+            "saturated" -> TerminalRed
+            "noisy" -> TerminalAmber
+            "moderate" -> TerminalBlue
+            else -> TerminalGreen
+        }
+        ScoreHeader(
+            label = "interruptions",
+            value = data.stressLabel,
+            score = (data.perHourAvg / 8.0).coerceIn(0.0, 1.0),
+            color = stressColor
+        )
+
+        Spacer(Modifier.height(10.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            StatCell(Icons.Default.Notifications, "${data.total7d}", "7d total")
+            StatCell(Icons.Default.Speed, "%.1f".format(data.perHourAvg), "per hour")
+            StatCell(Icons.Default.Bed, "${"%.0f".format(data.lateNightShare * 100)}%", "late night")
+        }
+
+        Spacer(Modifier.height(10.dp))
+        NotificationHeatmap(data.heatmap, data.maxCellCount)
+
+        if (data.topInterrupters.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            HorizontalDivider(color = DimGray.copy(alpha = 0.3f))
+            Spacer(Modifier.height(8.dp))
+            val max = data.topInterrupters.maxOf { it.second }.coerceAtLeast(1)
+            data.topInterrupters.take(5).forEach { (pkg, count) ->
+                CountBarRow(simplifyPackage(pkg), count, max, stressColor)
+            }
+        }
+    }
+}
+
+// ── Card 34: Integrity Trust ───────────────────────────────────────
+
+@Composable
+private fun IntegrityTrustCard(data: IntegrityTrust, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    val snapshot = listOf(
+        "rooted" to "${data.rooted}",
+        "debugger_attached" to "${data.debuggerAttached}",
+        "adb_enabled" to "${data.adbEnabled}",
+        "developer_options" to "${data.developerOptions}",
+        "test_keys" to "${data.testKeys}",
+        "emulator_heuristic" to "${data.emulatorHeuristic}",
+        "play_integrity" to data.playIntegrity,
+        "trust_score" to "${data.trustScore}",
+        "verdict_label" to data.verdictLabel
+    )
+    InsightCardShell(title = "Integrity Trust", icon = Icons.Default.Shield, accent = insightAccentForTitle("Integrity Trust"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
+        val trustColor = when {
+            data.trustScore >= 85 -> TerminalGreen
+            data.trustScore >= 60 -> TerminalAmber
+            else -> TerminalRed
+        }
+        ScoreHeader(
+            label = "device trust",
+            value = "${data.trustScore}",
+            score = data.trustScore / 100.0,
+            color = trustColor
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            data.verdictLabel.replace('_', ' '),
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace,
+            color = trustColor
+        )
+
+        Spacer(Modifier.height(10.dp))
+        IntegrityFlag("rooted", data.rooted)
+        IntegrityFlag("debugger attached", data.debuggerAttached)
+        IntegrityFlag("adb enabled", data.adbEnabled)
+        IntegrityFlag("developer options", data.developerOptions)
+        IntegrityFlag("test keys", data.testKeys)
+        IntegrityFlag("emulator heuristic", data.emulatorHeuristic)
+        CompactValueRow("play integrity", data.playIntegrity, DimGray)
+    }
+}
+
+// ── Card 35: Spending Pulse ────────────────────────────────────────
+
+@Composable
+private fun SpendingPulseCard(data: SpendingPulse, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    val snapshot = buildList {
+        add("transactions_30d" to "${data.transactions30d}")
+        add("transactions_this_week" to "${data.transactionsThisWeek}")
+        add("bank_alert_count_30d" to "${data.bankAlertCount30d}")
+        add("notification_volume_30d" to "${data.notificationVolume30d}")
+        add("otp_count_30d" to "${data.otpCount30d}")
+        add("pay_cadence_days" to (data.payCadenceDays?.let { "%.2f".format(it) } ?: "—"))
+        add("activity_label" to data.activityLabel)
+        data.topPaymentApps.take(5).forEach { (pkg, count) ->
+            add("pay_$pkg" to "$count")
+        }
+    }
+    InsightCardShell(title = "Spending Pulse", icon = Icons.Default.AttachMoney, accent = insightAccentForTitle("Spending Pulse"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
+        val activityColor = when (data.activityLabel) {
+            "heavy" -> TerminalRed
+            "active" -> TerminalAmber
+            else -> TerminalGreen
+        }
+        ScoreHeader(
+            label = "financial signal",
+            value = data.activityLabel,
+            score = ((data.transactions30d + data.bankAlertCount30d + data.notificationVolume30d) / 100.0).coerceIn(0.0, 1.0),
+            color = activityColor
+        )
+
+        Spacer(Modifier.height(10.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            StatCell(Icons.Default.AttachMoney, "${data.transactions30d}", "tx 30d")
+            StatCell(Icons.Default.Notifications, "${data.bankAlertCount30d}", "bank alerts")
+            StatCell(Icons.Default.LockOpen, "${data.otpCount30d}", "otp")
+        }
+
+        Spacer(Modifier.height(8.dp))
+        CompactValueRow("this week proxy", "${data.transactionsThisWeek} tx", TerminalBlue)
+        CompactValueRow("finance notifications", "${data.notificationVolume30d}", TerminalPurple)
+        data.payCadenceDays?.let {
+            CompactValueRow("pay cadence", "${"%.1f".format(it)} days", TerminalGreen)
+        }
+
+        if (data.topPaymentApps.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            HorizontalDivider(color = DimGray.copy(alpha = 0.3f))
+            Spacer(Modifier.height(8.dp))
+            val max = data.topPaymentApps.maxOf { it.second }.coerceAtLeast(1)
+            data.topPaymentApps.forEach { (pkg, count) ->
+                CountBarRow(simplifyPackage(pkg), count, max, activityColor)
+            }
+        }
+    }
+}
+
+// ── Card 36: Communication Depth ───────────────────────────────────
+
+@Composable
+private fun CommunicationDepthCard(data: CommunicationDepth, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
+    val snapshot = listOf(
+        "total_calls_30d" to "${data.totalCalls30d}",
+        "avg_call_minutes" to "%.2f".format(data.avgCallMinutes),
+        "total_sms_exchanged_30d" to "${data.totalSmsExchanged30d}",
+        "unique_counterparts_30d" to "${data.uniqueCounterparts30d}",
+        "close_tie_ratio" to "%.3f".format(data.closeTieRatio),
+        "late_percent" to "%.3f".format(data.latePercent),
+        "communication_style" to data.communicationStyle,
+        "responsiveness_score" to "%.3f".format(data.responsivenessScore)
+    )
+    InsightCardShell(title = "Communication Depth", icon = Icons.Default.Forum, accent = insightAccentForTitle("Communication Depth"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
+        val styleColor = when (data.communicationStyle) {
+            "voice_first" -> TerminalGreen
+            "text_first" -> TerminalBlue
+            "balanced" -> TerminalPurple
+            else -> DimGray
+        }
+        ScoreHeader(
+            label = "responsiveness",
+            value = data.communicationStyle.replace('_', ' '),
+            score = data.responsivenessScore,
+            color = styleColor
+        )
+
+        Spacer(Modifier.height(10.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            StatCell(Icons.Default.Forum, "${data.totalCalls30d}", "calls")
+            StatCell(Icons.Default.Notifications, "${data.totalSmsExchanged30d}", "sms")
+            StatCell(Icons.Default.Person, "${data.uniqueCounterparts30d}", "people")
+        }
+
+        Spacer(Modifier.height(8.dp))
+        CompactValueRow("avg call", "${"%.1f".format(data.avgCallMinutes)} min", TerminalGreen)
+        PercentageRow("top-5 concentration", data.closeTieRatio, TerminalAmber)
+        PercentageRow("late-night share", data.latePercent, TerminalRed)
+    }
+}
+
+@Composable
+private fun ScoreHeader(label: String, value: String, score: Double, color: Color) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column {
+            Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, fontSize = 10.sp, color = color, fontFamily = FontFamily.Monospace)
+        }
+        Text(
+            "${"%.0f".format(score.coerceIn(0.0, 1.0) * 100)}%",
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            color = color
+        )
+    }
+    Spacer(Modifier.height(6.dp))
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(6.dp)
+            .clip(RoundedCornerShape(3.dp))
+            .background(CellEmpty)
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth(fraction = score.toFloat().coerceIn(0f, 1f))
+                .height(6.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(color)
+        )
+    }
+}
+
+@Composable
+private fun PercentageRow(label: String, value: Double, color: Color) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            label,
+            fontSize = 10.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(0.34f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Box(modifier = Modifier.weight(0.46f).padding(horizontal = 6.dp)) {
+            Box(
+                Modifier
+                    .fillMaxWidth(fraction = value.toFloat().coerceIn(0f, 1f))
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(color.copy(alpha = 0.75f))
+            )
+        }
+        Text(
+            "${"%.0f".format(value * 100)}%",
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+            color = color,
+            modifier = Modifier.weight(0.2f)
+        )
+    }
+}
+
+@Composable
+private fun CountBarRow(label: String, count: Int, max: Int, color: Color) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            label,
+            fontSize = 10.sp,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(0.42f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Box(modifier = Modifier.weight(0.38f).padding(horizontal = 6.dp)) {
+            Box(
+                Modifier
+                    .fillMaxWidth(fraction = (count.toFloat() / max.coerceAtLeast(1)).coerceIn(0.04f, 1f))
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(color.copy(alpha = 0.75f))
+            )
+        }
+        Text(
+            "$count",
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+            color = color,
+            modifier = Modifier.weight(0.2f)
+        )
+    }
+}
+
+@Composable
+private fun CompactValueRow(label: String, value: String, color: Color) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, fontSize = 10.sp, color = DimGray)
+        Text(
+            value,
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+            color = color,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun IntegrityFlag(label: String, active: Boolean) {
+    val color = if (active) TerminalRed else TerminalGreen
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            if (active) "flagged" else "clear",
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+            color = color
+        )
+    }
+}
+
+@Composable
+private fun NotificationHeatmap(heatmap: List<List<Int>>, maxCellCount: Int) {
+    val dayLabels = listOf("M", "T", "W", "T", "F", "S", "S")
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Spacer(Modifier.width(16.dp))
+            listOf("0", "6", "12", "18").forEach { label ->
+                Text(
+                    label,
+                    fontSize = 8.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = DimGray,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+        heatmap.take(7).forEachIndexed { dayIndex, row ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    dayLabels.getOrElse(dayIndex) { "?" },
+                    fontSize = 8.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = DimGray,
+                    modifier = Modifier.width(16.dp)
+                )
+                row.take(24).forEach { count ->
+                    val intensity = if (maxCellCount > 0) (count.toFloat() / maxCellCount).coerceIn(0f, 1f) else 0f
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .height(7.dp)
+                            .padding(horizontal = 1.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(
+                                if (count == 0) CellEmpty else TerminalRed.copy(alpha = 0.2f + intensity * 0.8f)
+                            )
+                    )
+                }
+            }
+        }
+    }
+}
+
 // ── Shared card shell ────────────────────────────────────────────────
 
 @Composable
@@ -3318,13 +4303,16 @@ private fun InsightCardShell(
     accent: Color,
     meta: InsightMeta? = null,
     showDiagnostics: Boolean = false,
+    dataSnapshot: List<Pair<String, String>>? = null,
     content: @Composable () -> Unit
 ) {
     val expansionCommand = LocalCardExpansionCommand.current
     var infoExpanded by rememberSaveable(title) { mutableStateOf(false) }
+    var dataExpanded by rememberSaveable("$title:data") { mutableStateOf(false) }
     var collapsed by rememberSaveable("$title:collapsed") { mutableStateOf(true) }
     val educationalInfo = educationalInfoForTitle(title)
     val whyMatters = whyMattersForTitle(title)
+    val algorithm = algorithmForTitle(title)
     LaunchedEffect(expansionCommand.version) {
         collapsed = expansionCommand.collapsed
     }
@@ -3354,6 +4342,23 @@ private fun InsightCardShell(
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f)
                 )
+                if (dataSnapshot != null) {
+                    IconButton(
+                        onClick = {
+                            dataExpanded = !dataExpanded
+                            if (dataExpanded) collapsed = false
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.HelpOutline,
+                            "Show data for $title",
+                            tint = if (dataExpanded) TerminalBlue else DimGray,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(2.dp))
+                }
                 IconButton(
                     onClick = {
                         infoExpanded = !infoExpanded
@@ -3425,7 +4430,16 @@ private fun InsightCardShell(
             if (!collapsed) {
                 if (infoExpanded) {
                     Spacer(Modifier.height(8.dp))
-                    EducationalInfoPanel(text = educationalInfo, whyMatters = whyMatters, accent = accent)
+                    EducationalInfoPanel(
+                        text = educationalInfo,
+                        whyMatters = whyMatters,
+                        algorithm = algorithm,
+                        accent = accent
+                    )
+                }
+                if (dataExpanded && dataSnapshot != null) {
+                    Spacer(Modifier.height(8.dp))
+                    DataSnapshotPanel(rows = dataSnapshot, accent = accent)
                 }
                 // Data source + diagnostic info
                 if (meta != null && showDiagnostics) {
@@ -3486,6 +4500,7 @@ private fun InsightCardShell(
 private fun EducationalInfoPanel(
     text: String,
     whyMatters: String,
+    algorithm: String,
     accent: Color,
     modifier: Modifier = Modifier
 ) {
@@ -3511,6 +4526,85 @@ private fun EducationalInfoPanel(
             lineHeight = 15.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        Spacer(Modifier.height(8.dp))
+        HorizontalDivider(color = TerminalBlue.copy(alpha = 0.4f))
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "ALGORITHM",
+            fontSize = 9.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            color = TerminalBlue.copy(alpha = 0.8f)
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            algorithm,
+            fontSize = 11.sp,
+            lineHeight = 15.sp,
+            fontFamily = FontFamily.Monospace,
+            color = TerminalBlue
+        )
+    }
+}
+
+@Composable
+private fun DataSnapshotPanel(
+    rows: List<Pair<String, String>>,
+    accent: Color,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(TerminalBlue.copy(alpha = 0.06f))
+            .padding(10.dp)
+    ) {
+        Text(
+            "DATA USED",
+            fontSize = 9.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            color = TerminalBlue.copy(alpha = 0.8f)
+        )
+        Spacer(Modifier.height(4.dp))
+        HorizontalDivider(color = TerminalBlue.copy(alpha = 0.3f))
+        Spacer(Modifier.height(6.dp))
+        if (rows.isEmpty()) {
+            Text(
+                "(no data captured)",
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                color = DimGray
+            )
+        } else {
+            rows.forEach { (label, value) ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 1.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Text(
+                        label,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = DimGray,
+                        modifier = Modifier.weight(0.45f)
+                    )
+                    Text(
+                        value,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(0.55f),
+                        overflow = TextOverflow.Ellipsis,
+                        maxLines = 4
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -3600,6 +4694,39 @@ private fun educationalInfoForTitle(title: String): String = when (title) {
     "Voice Context" ->
         "Mirrors what speech patterns reveal about your context \u2014 without retaining raw audio. Conversation density, context labels, and keyword tags reflect whether you are in a meeting, running errands, watching media, or having a personal conversation. All processing is local; the reflection stays on your device."
 
+    "Travel Profile" ->
+        "Mirrors how far and how often you stray from your usual orbit. Carrier roaming flags, public-IP changes, location clusters far from home, and EXIF GPS spread combine into a single travel score. Profilers use the same signals to mark travel, surface travel-themed ads, and infer disposable income."
+
+    "Social Graph" ->
+        "Reflects the breadth of your interpersonal connections via hashed identifiers: contacts, distinct notification senders, call counterparts, SMS senders, and calendar attendees. No raw names or numbers leave your device. Profilers harvest the same skeleton to estimate community size and which channels you actually use."
+
+    "Activity Profile" ->
+        "Mirrors how your body moves throughout the day using on-device activity recognition. Still, walking, running, vehicle, and bicycle percentages reflect whether you are sedentary, active, commuting, or training. Profilers use this physical signal to score health risk, fitness intent, and commute mode."
+
+    "Heart Rate" ->
+        "Reflects resting rate, peak exertion, and recovery time when a body sensor is available. The reflection is not a medical reading. Wearable companies and ad networks use the same signal to estimate stress, sleep quality, exercise habits, and health-related audiences."
+
+    "Bluetooth Ecosystem" ->
+        "Mirrors the constellation of Bluetooth devices around you: paired earbuds, watches, speakers, cars, and nearby beacons. The brand mix can reveal purchasing power, mobility, work environment, and loyalty to a hardware ecosystem."
+
+    "Calendar Density" ->
+        "Reflects how packed your calendar is: weekly events, average events per workday, recurring patterns, back-to-back density, and median meeting length. Productivity SDKs and workplace tools use these numbers to score whether time is structured, free, fragmented, or overloaded."
+
+    "Photo Activity" ->
+        "Mirrors how often and where you take photos using EXIF metadata only; no pixels are inspected. Volume, distinct GPS locations, time-of-day mode, and camera diversity reflect lifestyle, travel, social activity, and hobbies."
+
+    "Notification Heatmap" ->
+        "Reflects the seven-day-by-twenty-four-hour grid of notifications posted to your device. Late-night intrusions, work-hours saturation, and top interrupters reveal which apps own the most expensive part of your day."
+
+    "Integrity Trust" ->
+        "Mirrors tamper signals: root status, debugger attachment, ADB enabled, developer options, AOSP test keys, emulator hints, and Play Integrity verdict. Banks, streaming services, ad networks, and fraud engines use the same signals to decide how much to trust the device."
+
+    "Spending Pulse" ->
+        "Reflects the financial heartbeat in messages and notifications: counts of bank alerts, OTPs, transactions, finance-app push notifications, and a crude pay-cadence estimate. No raw bodies are stored. Trackers use the same signals to infer income tier and payment-app loyalty."
+
+    "Communication Depth" ->
+        "Mirrors phone communication depth: total calls, average call length, SMS volume, unique counterparts, top-five concentration, and late-night share, all from hashed metadata. Voice-first, text-first, balanced, and quiet styles each reflect a distinct social shape."
+
     else ->
         "This card mirrors a specific behavioral signal and reflects what profilers would see if they had the same data. Treat every result as probabilistic: stronger data coverage raises confidence, while sparse or stale data should be read cautiously."
 }
@@ -3686,13 +4813,177 @@ private fun whyMattersForTitle(title: String): String = when (title) {
     "Voice Context" ->
         "Speech patterns reflect context that other device signals miss: meetings, errands, family time, media use. This mirror processes everything locally and retains only derived signals, but it still shows how much context a microphone can reflect."
 
+    "Travel Profile" ->
+        "Travel is a high-value signal because it changes risk, ads, pricing, and timing. This mirror shows how many ordinary fields can reconstruct movement even when no single source is complete."
+
+    "Social Graph" ->
+        "Your contact surface reflects influence, isolation, work demands, and relationship channels. This mirror keeps identifiers local and hashed, but still shows why social metadata is so valuable."
+
+    "Activity Profile" ->
+        "Physical movement reflects health, commute mode, work style, and daily constraint. This mirror shows how coarse sensor data can still classify a body in motion."
+
+    "Heart Rate" ->
+        "Heart-rate signals can expose stress, exertion, recovery, and sleep disruption. This mirror treats them cautiously, but it shows why wearable data has become a profiling prize."
+
+    "Bluetooth Ecosystem" ->
+        "Bluetooth devices mirror the environments and products around you. This reflection reveals how nearby hardware becomes a proxy for lifestyle, brand affinity, and location context."
+
+    "Calendar Density" ->
+        "A crowded calendar mirrors obligations before they happen. This reflection shows why schedule data is predictive: it tells a profiler where your attention will be unavailable next."
+
+    "Photo Activity" ->
+        "Photo metadata reflects travel, social life, hobbies, and routines without looking at image content. This mirror shows how much context rides along with ordinary files."
+
+    "Notification Heatmap" ->
+        "The timing of interruptions mirrors pressure. This reflection shows which apps reach you at night, during work, and during quiet hours, which is exactly what attention systems optimize."
+
+    "Integrity Trust" ->
+        "Integrity signals decide whether companies treat your device as ordinary, developer-modified, or hostile. This mirror exposes the hidden trust score behind fraud checks and access gates."
+
+    "Spending Pulse" ->
+        "Payment and OTP metadata reveal financial activity even when raw messages stay private. This mirror shows why transaction-adjacent signals are enough to target income, debt, and shopping behavior."
+
+    "Communication Depth" ->
+        "Communication metadata reveals relationship intensity without reading content. This mirror shows how call duration, SMS volume, late timing, and repeated counterparts become a social profile."
+
     else ->
         "Once a pattern is stable enough to reflect in a summary, it can be compared, ranked, predicted, and acted on by whoever holds the mirror."
 }
 
+private fun algorithmForTitle(title: String): String = when (title) {
+    "Today" ->
+        "Aggregate today's data points (since local midnight) into category counters: count screen-on transitions for unlocks, sum foreground intervals for screen time, integrate step-count deltas, take latest battery-level reading, count unique app launches. No smoothing or normalization."
+
+    "Sleep" ->
+        "1) Bin minute-resolution screen state to detect stillness windows >= 4h. 2) For each candidate, compute mean ambient lux and sound dBFS (if available). 3) Confidence = base(stillness duration) + bonus(dark) + bonus(quiet) + bonus(voice silent). 4) Persist last 72h of intervals; render as timeline."
+
+    "App Attention (7d)" ->
+        "For each foreground-event pair (start, end), accumulate per-package duration over a 7d window. Compare to the prior 7d baseline; flag deltas > 25% as up/down arrows. Rank descending by total ms, take top N."
+
+    "Anomaly Feed" ->
+        "For each tracked metric (unlocks/h, battery drop rate, late-night screen, data egress), compute rolling 14d mean + stddev. Z-score current sample; flag |z| > 2.0 as anomaly. Tag with severity, timestamp, and originating collector."
+
+    "Location Clusters" ->
+        "DBSCAN-lite: round each GPS fix to ~50m grid. For each cell, count visits and total dwell ms. Merge adjacent populated cells. Sort by dwell descending. Discard clusters with < 3 visits or < 10 minutes total dwell."
+
+    "Unlock After Notification" ->
+        "For every notification posted, find the next unlock event from the same package within 10 minutes. Compute latency = unlock_ts - notif_ts. Aggregate per package: count, mean latency, response rate = unlocks_within_10m / notifications."
+
+    "Fingerprint Stability" ->
+        "For each device-identity field (model, brand, build, locale, timezone, install IDs), keep a per-day distinct value set. Field is STABLE if 1 unique value across the window, DRIFTING if 2-3, UNSTABLE if 4+. Annotate the most-recent change timestamp."
+
+    "Monthly Trends" ->
+        "Group every captured data point by ISO calendar month. Aggregate month-level totals: unlocks, screen time, steps, sent+recv bytes. Compute month-over-month delta and direction. Truncate to last 12 months."
+
+    "Engagement Score" ->
+        "1) Detect sessions: contiguous foreground intervals with gap < 60s. 2) Sessions7d = count over last 7d. 3) Frequency = sessions7d / 7. 4) AvgLength = sum(durations) / sessions7d. 5) Bucket numbers vs analytics churn thresholds (sessions/d < 1, length < 60s flagged red)."
+
+    "Privacy Radar" ->
+        "For each installed app, score the union of its declared dangerous permissions (camera/mic/location/contacts/storage) weighted by recent runtime grants. Combine with PACKAGE_USAGE_STATS foreground time. Sort descending; tag categories accessed in the last 7d."
+
+    "Data Flow" ->
+        "Pull TrafficStats per-uid sent + received bytes deltas across the polling window. Group by package via uid->pkg map. Sum 7d totals. Compute upload ratio = tx / (tx + rx). Sort by total bytes descending."
+
+    "App Compulsion Index" ->
+        "For each package, count foreground re-entries within 60s of the last exit. CompulsionScore = (reopens / launches) * (1 / median_gap_minutes). Higher = tighter checking loop. Rank descending; cap top N for display."
+
+    "Device Health" ->
+        "Sample available system signals: ActivityManager.MemoryInfo (avail/total), running process count, BatteryManager.PROPERTY_TEMPERATURE (or battery-fallback), SystemClock.uptimeMillis. Trend = (current - rolling_mean_24h) / rolling_mean_24h."
+
+    "Identity Entropy" ->
+        "For each fingerprint dimension (model, hw revision, locale, timezone offset, screen resolution, build_id), estimate population frequency from a static prior. Total entropy = sum(-log2(p_i)) bits. Higher bits = more unique device."
+
+    "Home & Work" ->
+        "Filter location clusters by time-of-day: nighttime (22:00-06:00 dwell > 60% of cluster total) -> home candidate. Weekday daytime (Mon-Fri 09:00-18:00 dwell > 50%) -> work candidate. Pick top-1 of each by total dwell."
+
+    "Circadian Rhythm" ->
+        "Bin every unlock + activity event by hour-of-day across last 14d. Normalize to a 24-bin distribution. Peak hour = argmax. Quiet hour = argmin. Compute amplitude = peak / mean as rhythm strength."
+
+    "Routine Predictability" ->
+        "Build a per-day 24-hour activity vector. Compute pairwise cosine similarity across recent days. Predictability = mean similarity across all pairs. Higher = more repeatable schedule. Output as 0.0-1.0 score + descriptive label."
+
+    "Social Pressure" ->
+        "Per-package: count notifications received and unlock-within-2min responses. PressureScore = response_rate * notification_count / total_notifications. Surfaces apps that drive both volume and reflexive response."
+
+    "App Portfolio" ->
+        "Walk the installed-package list. Map each package to a category (finance/parenting/fitness/dating/gaming/productivity/...) via a static keyword-and-prefix dictionary. Count per category; flag presence of high-signal categories."
+
+    "Charging Behavior" ->
+        "Window-detect plug-in to plug-out events from battery_status stream. Per session: start_level, end_level, start_hour, duration. Aggregate: median start hour, median start level, % overnight (started 21:00-02:00 and lasted > 3h)."
+
+    "WiFi Footprint" ->
+        "Track distinct SSIDs seen in the last 7d (BSSID hashed for stability). Compute connection-time per SSID. Top SSID = mostly-connected network. Mobility score = unique SSIDs / total connection events."
+
+    "Session Fragmentation" ->
+        "Within each session, count app-switch transitions and average dwell-per-app. Fragmentation = switches / minute. High = rapid switching; low = sustained focus. Output 7d mean + descriptive bucket."
+
+    "Dwell Times" ->
+        "For each location cluster, compute median visit duration and visit frequency over 30d. DwellEntry = (cluster_id, median_min, visits). Sort by median descending; surface top N anchors."
+
+    "Weekday vs Weekend" ->
+        "Partition events into weekday (Mon-Fri) and weekend (Sat-Sun) buckets. For unlocks, screen time, top apps: compute per-day average per bucket. Delta = weekend - weekday; |delta| / weekday determines magnitude."
+
+    "Income Inference" ->
+        "1) Map device build SKU -> tier (budget/mid/premium/flagship). 2) Classify carrier MCC/MNC -> region/operator class. 3) Detect finance/luxury/premium app categories from portfolio. 4) Linear-combine with hand-tuned weights -> coarse income tier."
+
+    "Commute Pattern" ->
+        "Find nearest-cluster transitions between home cluster and work cluster. Filter to weekday trips; keep those with proximity match (cluster_distance < 200m). Aggregate departure_time, return_time, duration; report median + consistency = 1 - stddev/mean."
+
+    "Voice Context" ->
+        "Vosk transcribes microphone snippets only when speech is detected. Per window: extract token count, words/min, keyword tags from a fixed dictionary, context label (meeting/media/errands/personal). Raw audio is discarded; only signals stored."
+
+    "Travel Profile" ->
+        "TravelScore = w1*roaming_now + w2*public_ip_changes_7d/5 + w3*clusters_far_from_home/10 + w4*photo_locations_30d/20. Clipped to [0, 1]. Far-from-home = haversine(cluster, home) > 50km."
+
+    "Social Graph" ->
+        "Sum of distinct hashed identifiers across collectors: contact rows, notification senders 7d, call counterparts 30d, SMS senders 30d. Bucket total -> isolated/small/moderate/broad. SHA-256 first-8-bytes used; no raw PII surfaces."
+
+    "Activity Profile" ->
+        "ActivityRecognition emits classified samples (still/walking/running/vehicle/bicycle) with confidence. Aggregate over 7d: percentages by class. MovementIndex = (walking + running*2 + bicycle*1.5) / total, clipped to [0, 1]."
+
+    "Heart Rate" ->
+        "Body-sensor heart-rate samples ranked. Resting = 10th percentile. Median = 50th. Peak = max. ExertionPercent = samples >= 120 / total. Recovery = avg minutes from peak back to resting + 10 BPM."
+
+    "Bluetooth Ecosystem" ->
+        "For each paired device, infer brand from name prefix dictionary (Apple/Samsung/Bose/Sony/...). Aggregate paired counts and recent-scan counts. EcosystemLabel = argmax brand share if dominant > 60%, else 'mixed' or 'minimal'."
+
+    "Calendar Density" ->
+        "Read 30d of calendar events. Count total, this-week subset, recurring set, median duration, back-to-back fraction (events with < 15 min gap). Workday avg = total_workday_events / workday_count."
+
+    "Photo Activity" ->
+        "MediaStore EXIF-only scan of last 30d. Count photos, photos_with_gps, distinct rounded GPS cells, distinct camera_make+model strings. Mode-hour = argmax of capture-hour histogram."
+
+    "Notification Heatmap" ->
+        "Bin every received notification by (day_of_week, hour_of_day) into a 7x24 matrix. Late-night share = sum(rows for 22-06) / total. Work-hours share = sum(rows for 9-18 weekday) / total. StressLabel from total_per_hour vs thresholds."
+
+    "Integrity Trust" ->
+        "Probe: rooted (su/test-keys), debuggerAttached (Debug.isDebuggerConnected), adbEnabled (Settings.Global.ADB_ENABLED), developerOptions (DEVELOPMENT_SETTINGS_ENABLED), emulator-heuristic (build fingerprints). TrustScore = 100 - 15*flag_count, clipped to 0."
+
+    "Spending Pulse" ->
+        "Tag SMS bodies by regex heuristic without storing content: /OTP|verif/ -> otp, /credited|debited|txn/ -> transaction, /balance|account/ -> bank_alert, /sale|offer|discount/ -> promo. Pay-cadence = median gap between large-credit signals."
+
+    "Communication Depth" ->
+        "From CallLog metadata: total calls, mean duration, missed/rejected counts. From SMS: sent+recv counts, unique hashed counterparts. CloseTieRatio = top-5-counterparts share. LatePercent = events 22:00-06:00 / total. Style label from voice-vs-text balance."
+
+    else ->
+        "Pulls from unified data_points table, filters by collector_id and time range, applies per-card aggregation/heuristic, persists results in InsightsState. No external network. All computation runs on-device against the local SQLCipher database."
+}
+
 @Composable
 private fun VoiceContextCard(data: VoiceContextInsight, meta: InsightMeta? = null, showDiagnostics: Boolean = false) {
-    InsightCardShell(title = "Voice Context", icon = Icons.Default.Mic, accent = insightAccentForTitle("Voice Context"), meta = meta, showDiagnostics = showDiagnostics) {
+    val snapshot = buildList {
+        add("samples_7d" to "${data.samples7d}")
+        add("conversation_samples" to "${data.conversationSamples}")
+        add("avg_speech_density_wpm" to "%.2f".format(data.avgSpeechDensityWpm))
+        data.topContexts.take(5).forEach { (ctx, count) ->
+            add("context_$ctx" to "$count")
+        }
+        data.topTags.take(5).forEach { (tag, count) ->
+            add("tag_$tag" to "$count")
+        }
+        add("latest_transcript" to (data.latestTranscript?.take(200) ?: "—"))
+    }
+    InsightCardShell(title = "Voice Context", icon = Icons.Default.Mic, accent = insightAccentForTitle("Voice Context"), meta = meta, showDiagnostics = showDiagnostics, dataSnapshot = snapshot) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             StatCell(Icons.Default.Mic, "${data.conversationSamples}/${data.samples7d}", "speech windows")
             StatCell(Icons.Default.Speed, "${"%.0f".format(data.avgSpeechDensityWpm)}", "words/min")

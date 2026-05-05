@@ -8,6 +8,11 @@
     permission. Unused permissions are a code smell in this project.
     -->
 
+    <!-- READ_SMS/READ_CALL_LOG imply telephony hardware unless declared optional. -->
+    <uses-feature
+        android:name="android.hardware.telephony"
+        android:required="false" />
+
     <!-- Foreground service for continuous sensor/behavioral collection -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
@@ -47,6 +52,16 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <!-- READ_MEDIA_VIDEO removed: MediaExifCollector only reads images.
          READ_PHONE_STATE removed: no collector uses it. -->
+
+    <!-- SmsCollector: opt-in. Stores only counts, hashed senders, message-length
+         buckets, and whether bodies look like OTPs/bank alerts. Raw bodies are
+         never persisted. -->
+    <uses-permission android:name="android.permission.READ_SMS" />
+
+    <!-- CallLogCollector: opt-in. Stores only durations, call types, hashed
+         numbers, and aggregate counts. Raw call detail records are never
+         persisted. -->
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
 
     <!-- VoiceTranscriptionCollector: opt-in, on-device periodic speech windows.
          No raw audio is stored; recognized text and derived context tags are

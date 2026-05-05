@@ -12,9 +12,9 @@ Existing privacy tools like Exodus Privacy and TrackerControl show you *what lea
 
 ## What It Does
 
-MirrorTrack runs 31 data collectors across 7 categories, feeding a unified encrypted database that powers 26 insight cards with real behavioral inference:
+MirrorTrack runs 34 data collectors across 7 categories, feeding a unified encrypted database that powers 37 insight cards plus an anomaly feed with real behavioral inference:
 
-### Data Collection (31 Collectors)
+### Data Collection (34 Collectors)
 
 | Category | Collectors | Examples |
 |----------|-----------|----------|
@@ -24,11 +24,11 @@ MirrorTrack runs 31 data collectors across 7 categories, feeding a unified encry
 | **Network** | 6 | WiFi SSIDs, Bluetooth devices, carrier info, public IP, connectivity state, per-app data usage |
 | **Apps** | 5 | Installed packages, usage stats, notification listener, AppOps audit, privacy dashboard |
 | **Sensors** | 5 | Accelerometer/gyroscope, environment (light/pressure/temp), ambient sound level, step counter, body sensors |
-| **Personal** | 4 | Calendar events, contacts metadata, photo EXIF data, on-device voice context |
+| **Personal** | 7 | Calendar events, contacts metadata, call/SMS aggregates, photo EXIF data, on-device voice context |
 
 Every collector is **opt-in** — disabled by default, toggled individually in Settings. Each permission is gated behind an in-app explanation before any runtime request.
 
-### Insight Engine (26 Cards)
+### Insight Engine (37 Cards + Anomaly Feed)
 
 The Insights screen processes raw data points into behavioral intelligence — the same kind of profiles that ad tech builds about you:
 
@@ -61,6 +61,17 @@ The Insights screen processes raw data points into behavioral intelligence — t
 | **Income Inference** | Socioeconomic tier from device model + carrier + app signals |
 | **Commute Pattern** | Departure/return times, transport mode, consistency scoring |
 | **Voice Context** | Local speech-window summaries for conversation density and context tags without storing raw audio |
+| **Travel Profile** | Roaming, public-IP shifts, far location clusters, and photo-location spread |
+| **Social Graph** | Relationship breadth from contacts, notifications, calendar, call, and SMS metadata |
+| **Activity Profile** | Still/walking/running/vehicle movement mix from activity recognition |
+| **Heart Rate** | Sensor-derived resting, median, peak, exertion, and recovery summaries |
+| **Bluetooth Ecosystem** | Paired and nearby Bluetooth device mix with local brand hints |
+| **Calendar Density** | Event volume, recurring patterns, meeting duration, and back-to-back load |
+| **Photo Activity** | EXIF-only photo volume, GPS coverage, location spread, camera diversity, and capture timing |
+| **Notification Heatmap** | 7-by-24 interruption map with late-night and work-hour pressure |
+| **Integrity Trust** | Root, debugger, ADB, developer options, test key, emulator, and integrity indicators |
+| **Spending Pulse** | Bank-alert, OTP, transaction, and finance-notification aggregates |
+| **Communication Depth** | Call/SMS volume, counterpart breadth, late timing, and communication style |
 
 ### Security
 
@@ -91,7 +102,7 @@ Collector (interface)
             |
             v
         InsightsViewModel
-          |-- 25 async computations
+          |-- parallel insight computations
           |-- behavioral inference engine
           |-- anomaly detection
 ```
@@ -180,7 +191,7 @@ mirrortrack/
 |   |   +-- network/                   WiFi, Bluetooth, Carrier, IP, Connectivity, Usage
 |   |   +-- apps/                      Installed, UsageStats, Notifications, AppOps, Privacy
 |   |   +-- sensors/                   Motion, Environment, Step, Body
-|   |   +-- personal/                  Calendar, Contacts, MediaExif
+|   |   +-- personal/                  Calendar, Contacts, CallLog, Sms, MediaExif, Voice (transcription + speech-gated)
 |   +-- data/
 |   |   +-- MirrorDatabase.kt         Room + SQLCipher
 |   |   +-- CryptoManager.kt          Argon2id KDF + salt management
@@ -198,7 +209,7 @@ mirrortrack/
 |   +-- ui/
 |   |   +-- unlock/                    Passphrase entry + key derivation
 |   |   +-- feed/                      Real-time data point stream
-|   |   +-- insights/                  25-card behavioral analysis (2800+ lines)
+|   |   +-- insights/                  37-card behavioral analysis + anomaly feed (~9300 lines)
 |   |   +-- categories/                Category browser + detail drill-down
 |   |   +-- settings/                  Per-collector toggles + health indicators
 |   |   +-- permissions/               Runtime permission flow

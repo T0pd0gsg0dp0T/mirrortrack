@@ -7,8 +7,8 @@ A personal Android app that collects the same categories of device/behavioral/se
 The repo is public, so keep it code-only: never commit device exports, decrypted databases, screenshots containing personal data, keystores, salts, transcripts, logs, or local analysis outputs.
 
 Current app shape:
-- 31 opt-in collectors across device, behavioral, location, network, apps, sensors, and personal data.
-- 26 insight cards, including the last-72-hour Sleep Timeline and Voice Context.
+- 34 opt-in collectors across device, behavioral, location, network, apps, sensors, and personal data.
+- 37 insight cards, including the last-72-hour Sleep Timeline, Voice Context, and expanded personal-signal cards.
 - Sleep inference uses phone inactivity plus available ambient light, ambient sound, and voice quietness evidence. Screen-off alone is not considered a strong signal.
 
 ## Non-negotiable rules

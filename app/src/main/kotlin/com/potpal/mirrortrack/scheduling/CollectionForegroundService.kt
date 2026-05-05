@@ -1,5 +1,6 @@
 package com.potpal.mirrortrack.scheduling
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,9 +8,14 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import com.potpal.mirrortrack.R
+import com.potpal.mirrortrack.collectors.Collector
 import com.potpal.mirrortrack.collectors.CollectorRegistry
 import com.potpal.mirrortrack.collectors.Ingestor
 import com.potpal.mirrortrack.data.DataPointDao
@@ -43,7 +49,7 @@ class CollectionForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification(0, 0))
+        startForegroundWithType(buildNotification(0, 0), includeMicrophone = false)
         scope.launch { notificationUpdateLoop() }
     }
 
@@ -69,11 +75,29 @@ class CollectionForegroundService : Service() {
 
         val allCollectors = registry.all()
         val streamedCollectors = allCollectors.filter { it.defaultPollInterval == null }
+        val availableCollectors = mutableSetOf<String>()
+        var needsMicrophoneType = false
 
         for (collector in streamedCollectors) {
             val effectiveEnabled = prefs.isEnabledSync(collector.id) || collector.defaultEnabled
-
             if (effectiveEnabled && collector.isAvailable(applicationContext)) {
+                availableCollectors += collector.id
+                if (collector.requiresMicrophone()) {
+                    needsMicrophoneType = true
+                }
+            }
+        }
+
+        val canRunMicrophoneStreams = startForegroundWithType(
+            buildNotification(streamJobs.count { it.value.isActive }, 0),
+            includeMicrophone = needsMicrophoneType
+        )
+
+        for (collector in streamedCollectors) {
+            val canRunCollector = collector.id in availableCollectors &&
+                (!collector.requiresMicrophone() || canRunMicrophoneStreams)
+
+            if (canRunCollector) {
                 if (streamJobs[collector.id]?.isActive != true) {
                     streamJobs[collector.id] = scope.launch {
                         try {
@@ -98,6 +122,9 @@ class CollectionForegroundService : Service() {
         }
         updateNotification()
     }
+
+    private fun Collector.requiresMicrophone(): Boolean =
+        Manifest.permission.RECORD_AUDIO in requiredPermissions
 
     private suspend fun notificationUpdateLoop() {
         while (true) {
@@ -183,6 +210,50 @@ class CollectionForegroundService : Service() {
         }
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
+
+    private fun startForegroundWithType(
+        notification: Notification,
+        includeMicrophone: Boolean
+    ): Boolean {
+        val requestedType = foregroundServiceType(includeMicrophone)
+        if (includeMicrophone && !hasRecordAudioPermission()) {
+            ServiceCompat.startForeground(
+                this,
+                NOTIFICATION_ID,
+                notification,
+                foregroundServiceType(includeMicrophone = false)
+            )
+            return false
+        }
+        return try {
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, requestedType)
+            true
+        } catch (e: SecurityException) {
+            if (!includeMicrophone) throw e
+
+            Logger.w(TAG, "Microphone foreground service type unavailable; skipping microphone streams", e)
+            ServiceCompat.startForeground(
+                this,
+                NOTIFICATION_ID,
+                notification,
+                foregroundServiceType(includeMicrophone = false)
+            )
+            false
+        }
+    }
+
+    private fun foregroundServiceType(includeMicrophone: Boolean): Int {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return 0
+
+        var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        if (includeMicrophone && hasRecordAudioPermission()) {
+            type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        }
+        return type
+    }
+
+    private fun hasRecordAudioPermission(): Boolean =
+        checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
     companion object {
         private const val TAG = "CollectionFGS"

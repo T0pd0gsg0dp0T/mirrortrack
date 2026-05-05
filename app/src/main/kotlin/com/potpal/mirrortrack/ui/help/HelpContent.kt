@@ -264,6 +264,100 @@ object HelpContent {
             )
         ),
         HelpSection(
+            title = "Expanded Personal Signals",
+            intro = "These cards show how broader opt-in signals become profile features: travel, relationships, movement, health-adjacent sensors, schedule density, photos, device trust, spending, and communication style.",
+            cards = listOf(
+                HelpCard(
+                    title = "Travel Profile",
+                    summary = "Estimates whether the device is mostly local or showing travel-like movement.",
+                    calculation = "Combines carrier country/roaming flags, public-IP changes, location clusters more than 50 km from inferred home, median radius of far clusters, and distinct EXIF GPS photo spots into a 0-1 travel score.",
+                    dataUsed = "Primary: carrier and location. Fallback/context: public_ip and media_exif.",
+                    permissions = "ACCESS_FINE_LOCATION for location; media permissions for EXIF photo metadata. Carrier and public-IP collectors do not require runtime permissions, but public-IP is the only allowed INTERNET use.",
+                    notes = "Travel is a high-value ad, fraud, timing, and risk signal. This card intentionally keeps the inference rough."
+                ),
+                HelpCard(
+                    title = "Social Graph",
+                    summary = "Estimates the breadth of the device owner's relationship surface without storing raw names or numbers.",
+                    calculation = "Counts contacts, distinct notification senders, unique call counterparts, unique SMS senders, and a calendar attendee proxy, then labels the total as isolated, small, moderate, or broad.",
+                    dataUsed = "contacts, notification_listener, calendar, call_log, and sms.",
+                    permissions = "READ_CONTACTS, READ_CALENDAR, READ_CALL_LOG, READ_SMS, and Notification Listener special access depending on enabled sources.",
+                    notes = "Identifiers are hashed or aggregated by the collectors. The point is to show that metadata alone still exposes social shape."
+                ),
+                HelpCard(
+                    title = "Activity Profile",
+                    summary = "Shows coarse physical movement buckets over the last 30 days.",
+                    calculation = "Groups activity_recognition samples into still, walking, running, vehicle, and bicycle percentages, averages confidence, and combines movement categories into a 0-1 movement index.",
+                    dataUsed = "activity_recognition activity and confidence_estimate points.",
+                    permissions = "ACTIVITY_RECOGNITION.",
+                    notes = "This is a lightweight heuristic, not a medical or fitness-grade classifier."
+                ),
+                HelpCard(
+                    title = "Heart Rate",
+                    summary = "Summarizes heart-rate sensor patterns when BODY_SENSORS data exists.",
+                    calculation = "Uses the 10th percentile as a resting estimate, median and max BPM for central tendency and peak exertion, percent of samples above 120 BPM, and a crude post-peak recovery window.",
+                    dataUsed = "body_sensors heart_rate_bpm points.",
+                    permissions = "BODY_SENSORS.",
+                    notes = "This card is explicitly not medical advice. It exists to show how health-adjacent sensor data becomes a profile feature."
+                ),
+                HelpCard(
+                    title = "Bluetooth Ecosystem",
+                    summary = "Shows the paired and nearby Bluetooth device environment.",
+                    calculation = "Parses paired_devices and BLE scan_results, counts paired devices, nearby unique addresses, average scan size, and infers rough brand categories from device names.",
+                    dataUsed = "bluetooth paired_devices and scan_results JSON.",
+                    permissions = "BLUETOOTH_SCAN and BLUETOOTH_CONNECT on Android 12+, or ACCESS_FINE_LOCATION on older Android versions.",
+                    notes = "No external MAC lookup is performed. Brand inference is local string matching only."
+                ),
+                HelpCard(
+                    title = "Calendar Density",
+                    summary = "Measures how crowded and fragmented the schedule looks.",
+                    calculation = "Deduplicates calendar events, counts events in the past 30 days and current week, estimates average workday load, recurring title hashes, median duration, and back-to-back event share.",
+                    dataUsed = "calendar event JSON, including start_ms, end_ms, title hash, and organizer presence.",
+                    permissions = "READ_CALENDAR.",
+                    notes = "Calendar density predicts unavailable attention before the behavior happens."
+                ),
+                HelpCard(
+                    title = "Photo Activity",
+                    summary = "Summarizes local photo metadata without inspecting image pixels.",
+                    calculation = "Counts photos over 30 and 7 days, photos with and without GPS, distinct rounded EXIF GPS locations, distinct camera make/model values, and the most common capture hour.",
+                    dataUsed = "media_exif image JSON.",
+                    permissions = "READ_MEDIA_IMAGES on Android 13+, READ_MEDIA_VISUAL_USER_SELECTED on Android 14 partial access, or READ_EXTERNAL_STORAGE on older Android.",
+                    notes = "EXIF alone can reveal travel, routine, hobbies, and social activity."
+                ),
+                HelpCard(
+                    title = "Notification Heatmap",
+                    summary = "Builds a 7-by-24 interruption map from notifications.",
+                    calculation = "Counts notification_listener events by day of week and hour, computes total notifications, average per hour, late-night share, work-hours share, top interrupters, and a calm/moderate/noisy/saturated label.",
+                    dataUsed = "notification_listener notif_posted points.",
+                    permissions = "Notification Listener special access.",
+                    notes = "The heatmap shows when apps can reach the user, which is exactly what attention systems optimize."
+                ),
+                HelpCard(
+                    title = "Integrity Trust",
+                    summary = "Summarizes device trust and tamper indicators.",
+                    calculation = "Reads root, su binary, debugger, ADB, developer options, test keys, emulator heuristics, and Play Integrity availability, then subtracts weighted penalties from a 100-point trust score.",
+                    dataUsed = "integrity collector fields.",
+                    permissions = "None.",
+                    notes = "This mirrors the kind of hidden trust checks used by banks, streaming services, fraud systems, and some ad SDKs."
+                ),
+                HelpCard(
+                    title = "Spending Pulse",
+                    summary = "Shows finance-adjacent activity from SMS and notification metadata.",
+                    calculation = "Counts transaction-like SMS, bank alerts, OTPs, finance-app notifications, a this-week transaction proxy, top payment apps, and an optional cadence estimate from notification peaks.",
+                    dataUsed = "sms aggregate counts and notification_listener package names; logcat is listed only as a future fallback signal.",
+                    permissions = "READ_SMS and Notification Listener special access.",
+                    notes = "Raw message bodies are not persisted. The collector stores only aggregate counts and hashed sender-derived metadata."
+                ),
+                HelpCard(
+                    title = "Communication Depth",
+                    summary = "Estimates communication style from call and SMS aggregates.",
+                    calculation = "Combines inbound/outbound/missed call counts, total call duration, unique counterparts, top-five counterpart share, inbox/sent SMS counts, and merged hourly histograms into voice-first, text-first, balanced, or quiet labels.",
+                    dataUsed = "call_log and sms aggregate points, with contacts as context/fallback for graph breadth.",
+                    permissions = "READ_CALL_LOG and READ_SMS.",
+                    notes = "This card demonstrates how relationship intensity can be inferred from metadata without reading communication content."
+                )
+            )
+        ),
+        HelpSection(
             title = "Dense Technical Profile",
             intro = "These are lower in the Insights order because they are more technical, but they show how surveillance systems score identity, attention, and data movement.",
             cards = listOf(
