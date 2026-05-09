@@ -13,8 +13,10 @@ import com.potpal.mirrortrack.collectors.Category
 import com.potpal.mirrortrack.collectors.Collector
 import com.potpal.mirrortrack.collectors.DataPoint
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
+import kotlin.coroutines.coroutineContext
 import javax.inject.Singleton
 import kotlin.math.log10
 import kotlin.math.sqrt
@@ -45,6 +47,7 @@ class AmbientSoundCollector @Inject constructor() : Collector {
     override suspend fun collect(context: Context): List<DataPoint> {
         if (!isAvailable(context)) return emptyList()
         val sample = withContext(Dispatchers.IO) { sampleSoundLevel() } ?: return emptyList()
+        if (sample.dbfs == 0.0 && sample.rms == 0.0 && sample.peak == 0) return emptyList()
         return listOf(
             DataPoint.double(id, category, "ambient_sound_dbfs", sample.dbfs),
             DataPoint.double(id, category, "ambient_sound_rms", sample.rms),
@@ -54,7 +57,7 @@ class AmbientSoundCollector @Inject constructor() : Collector {
     }
 
     @SuppressLint("MissingPermission")
-    private fun sampleSoundLevel(): SoundSample? {
+    private suspend fun sampleSoundLevel(): SoundSample? {
         val minBuffer = AudioRecord.getMinBufferSize(
             SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
@@ -81,6 +84,7 @@ class AmbientSoundCollector @Inject constructor() : Collector {
 
             recorder.startRecording()
             while (System.currentTimeMillis() < deadline) {
+                coroutineContext.ensureActive()
                 val read = recorder.read(buffer, 0, buffer.size)
                 if (read <= 0) continue
                 for (i in 0 until read) {
@@ -122,7 +126,9 @@ class AmbientSoundCollector @Inject constructor() : Collector {
 
     private companion object {
         const val SAMPLE_RATE = 8_000
-        const val SAMPLE_WINDOW_MS = 3_000L
+        // Short window to keep mic-on time per poll low. 1.5s is enough to get
+        // a stable RMS estimate without burning battery or alarming the user.
+        const val SAMPLE_WINDOW_MS = 1_500L
         const val QUIET_DBFS = -45.0
         const val MODERATE_DBFS = -30.0
     }

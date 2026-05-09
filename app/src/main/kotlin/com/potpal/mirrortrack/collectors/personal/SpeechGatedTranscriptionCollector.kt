@@ -15,10 +15,12 @@ import com.potpal.mirrortrack.collectors.DataPoint
 import com.potpal.mirrortrack.util.Logger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -87,6 +89,7 @@ class SpeechGatedTranscriptionCollector @Inject constructor() : Collector {
             var lastTranscriptionAt = 0L
 
             while (true) {
+                coroutineContext.ensureActive()
                 if (!isAvailable(context)) {
                     delay(SENTRY_INTERVAL_MS)
                     continue
@@ -125,7 +128,7 @@ class SpeechGatedTranscriptionCollector @Inject constructor() : Collector {
     }
 
     @SuppressLint("MissingPermission")
-    private fun sampleSentry(): SoundSample? {
+    private suspend fun sampleSentry(): SoundSample? {
         val minBuffer = AudioRecord.getMinBufferSize(
             SENTRY_SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
@@ -150,6 +153,7 @@ class SpeechGatedTranscriptionCollector @Inject constructor() : Collector {
 
             recorder.startRecording()
             while (System.currentTimeMillis() < deadline) {
+                coroutineContext.ensureActive()
                 val read = recorder.read(buffer, 0, buffer.size)
                 if (read <= 0) continue
                 for (i in 0 until read) {
@@ -312,13 +316,22 @@ class SpeechGatedTranscriptionCollector @Inject constructor() : Collector {
     private companion object {
         const val TAG = "SpeechGatedTranscription"
         const val SENTRY_SAMPLE_RATE = 8_000
+        // Each sentry pass opens the mic for SENTRY_WINDOW_MS, then sleeps for
+        // SENTRY_INTERVAL_MS before the next pass. Keeping the gap large (≥30s)
+        // is critical for battery: the previous 1.5s/1.5s pattern meant the mic
+        // was open ~50% of the time. With these defaults the mic-on duty cycle
+        // for sentry passes is well under 5%.
         const val SENTRY_WINDOW_MS = 1_500L
-        const val SENTRY_INTERVAL_MS = 1_500L
+        const val SENTRY_INTERVAL_MS = 30_000L
         const val QUIET_DBFS = -45.0
-        const val TRIGGER_THRESHOLD = 4
-        const val COOLDOWN_MS = 60_000L
+        // Three consecutive loud passes (~90s of sustained activity at the new
+        // interval) before a transcription is triggered.
+        const val TRIGGER_THRESHOLD = 3
+        const val COOLDOWN_MS = 5 * 60_000L
         const val VOSK_SAMPLE_RATE = 16_000.0f
-        const val WINDOW_MS = 20_000
+        // Capped at 8s — long enough to capture a sentence, short enough that a
+        // mid-recording cancel can never leak more than that.
+        const val WINDOW_MS = 8_000
         const val MIN_WORDS_FOR_CONTEXT = 4
 
         val json = Json { ignoreUnknownKeys = true }

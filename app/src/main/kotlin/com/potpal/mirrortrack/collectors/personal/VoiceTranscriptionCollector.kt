@@ -11,10 +11,12 @@ import com.potpal.mirrortrack.collectors.DataPoint
 import com.potpal.mirrortrack.util.Logger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -68,6 +70,7 @@ class VoiceTranscriptionCollector @Inject constructor() : Collector {
         val model = withContext(Dispatchers.IO) { Model(modelDir.absolutePath) }
         try {
             while (true) {
+                coroutineContext.ensureActive()
                 val window = transcribeWindow(model)
                 window.toDataPoints().forEach { emit(it) }
                 delay(SAMPLE_INTERVAL_MS)
@@ -219,8 +222,11 @@ class VoiceTranscriptionCollector @Inject constructor() : Collector {
     private companion object {
         const val TAG = "VoiceTranscription"
         const val SAMPLE_RATE = 16_000.0f
-        const val WINDOW_MS = 20_000
-        const val SAMPLE_INTERVAL_MS = 10 * 60_000L
+        // Capped at 8s per recording. Long enough to capture a usable sentence,
+        // short enough that cancellation mid-recording cannot leak more than
+        // 8s of further mic-on time.
+        const val WINDOW_MS = 8_000
+        const val SAMPLE_INTERVAL_MS = 15 * 60_000L
         const val MIN_WORDS_FOR_CONTEXT = 4
 
         val json = Json { ignoreUnknownKeys = true }

@@ -11,6 +11,7 @@ import com.potpal.mirrortrack.settings.CollectorPreferences
 import com.potpal.mirrortrack.util.Logger
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.flow.first
 
 @HiltWorker
 class PolledCollectionWorker @AssistedInject constructor(
@@ -26,6 +27,14 @@ class PolledCollectionWorker @AssistedInject constructor(
         if (!databaseHolder.isOpen()) {
             Logger.d(TAG, "DB not open, skipping polled collection")
             return Result.retry()
+        }
+
+        // Master kill-switch: if the user has toggled Collection Service off,
+        // never open mics/sensors from a polled worker either, even if
+        // WorkManager hasn't finished cancelling the schedule yet.
+        if (!prefs.isServiceEnabled().first()) {
+            Logger.d(TAG, "Service disabled, skipping polled collection")
+            return Result.success()
         }
 
         val collectorId = inputData.getString(KEY_COLLECTOR_ID) ?: return Result.failure()
