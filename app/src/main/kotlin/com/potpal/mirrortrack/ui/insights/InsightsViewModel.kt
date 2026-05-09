@@ -2033,7 +2033,8 @@ class InsightsViewModel @Inject constructor(
                     backgroundCount = bgCount,
                     thermalStatus = thermal,
                     uptimeHours = uptimeMs / 3_600_000.0,
-                    memoryTrend = memTrend
+                    memoryTrend = memTrend,
+                    processCountsTrusted = true
                 )
             }
         }
@@ -2087,6 +2088,9 @@ class InsightsViewModel @Inject constructor(
             0.0
         }
 
+        // Android 22+ restricts runningAppProcesses to the calling app only,
+        // so the counts are not meaningful for "device health." Skip them and
+        // mark the result untrusted; the card will hide the counts row.
         val processes = activityManager.runningAppProcesses.orEmpty()
         val foreground = processes.count {
             it.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
@@ -2118,7 +2122,8 @@ class InsightsViewModel @Inject constructor(
             backgroundCount = background,
             thermalStatus = thermal,
             uptimeHours = android.os.SystemClock.elapsedRealtime() / 3_600_000.0,
-            memoryTrend = 0.0
+            memoryTrend = 0.0,
+            processCountsTrusted = false
         )
     }
 

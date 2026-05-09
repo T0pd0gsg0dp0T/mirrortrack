@@ -342,6 +342,7 @@ data class SelfAuditData(
 @Composable
 fun SettingsScreen(
     onNavigateToPermissions: () -> Unit,
+    onResumeOnboarding: (startGroupId: String?) -> Unit = {},
     onBack: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
@@ -541,6 +542,22 @@ fun SettingsScreen(
             ) {
                 Text("Manage Permissions")
             }
+        }
+
+        // Resume onboarding entry
+        item {
+            OutlinedButton(
+                onClick = { onResumeOnboarding(null) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("What else can MirrorTrack see?")
+            }
+            Text(
+                "Walks through the remaining permissions one at a time and shows what each one unlocks.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+            )
         }
 
         // Collectors by category

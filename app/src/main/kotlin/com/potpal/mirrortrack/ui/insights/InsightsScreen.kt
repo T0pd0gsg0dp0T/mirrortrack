@@ -172,9 +172,16 @@ private enum class CardSortField(val label: String) {
 fun InsightsScreen(
     onNavigateToSettings: () -> Unit = {},
     onNavigateToCategoryDetail: (String) -> Unit = {},
-    viewModel: InsightsViewModel = hiltViewModel()
+    onResumeOnboarding: (startGroupId: String?) -> Unit = {},
+    viewModel: InsightsViewModel = hiltViewModel(),
+    onboardingViewModel: com.potpal.mirrortrack.ui.onboarding.OnboardingViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val undecidedGroups by onboardingViewModel.undecidedGroups()
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val lockedCardCount = remember(undecidedGroups) {
+        onboardingViewModel.lockedCardCount(undecidedGroups)
+    }
     var showHelp by rememberSaveable { mutableStateOf(false) }
     var showSortControls by rememberSaveable { mutableStateOf(false) }
     var collapseAllCards by rememberSaveable { mutableStateOf(true) }
@@ -383,12 +390,16 @@ fun InsightsScreen(
             })
         }
     }
-    val defaultCardOrder = activeCards.map { it.key }
+    // Pull "today" out — it gets its own section directly under the
+    // Collected Data summary because the two cards are conceptually related.
+    val todayCard = activeCards.firstOrNull { it.key == "today" }
+    val nonTodayCards = activeCards.filter { it.key != "today" }
+    val defaultCardOrder = wizardDefaultOrder(nonTodayCards)
     var localCardOrder by remember(defaultCardOrder, state.cardOrder) {
         mutableStateOf(resolveCardOrder(defaultCardOrder, state.cardOrder))
     }
     val orderedActiveCards = sortActiveCards(
-        cards = activeCards,
+        cards = nonTodayCards,
         manualOrder = localCardOrder,
         sortField = sortField,
         descending = sortDescending
@@ -488,6 +499,29 @@ fun InsightsScreen(
                             categories = state.categoryCounts,
                             onCategoryClick = onNavigateToCategoryDetail
                         )
+                    }
+
+                    // ── TODAY (its own mini-section directly under Collected Data) ──
+                    if (todayCard != null) {
+                        item(key = "today_section_header") {
+                            SectionLabel("TODAY", Icons.Default.Timeline, TerminalGreen)
+                        }
+                        item(key = todayCard.key) {
+                            todayCard.content()
+                        }
+                    }
+
+                    // ── FINISH SETUP PROMPT ─────────────────────────────
+                    if (undecidedGroups.isNotEmpty()) {
+                        item(key = "finish_setup") {
+                            FinishSetupCard(
+                                lockedCardCount = lockedCardCount,
+                                undecidedStepCount = undecidedGroups.size,
+                                onResume = {
+                                    onResumeOnboarding(undecidedGroups.first().id)
+                                }
+                            )
+                        }
                     }
 
                     // ── TOOLBAR ROW ─────────────────────────────────────
@@ -624,6 +658,69 @@ private data class UnavailableInsight(
     val icon: ImageVector,
     val reason: String
 )
+
+/**
+ * Default insight-card display order, mirroring the onboarding wizard:
+ * Activity → Location → Audio → Phone Use → People & Schedule → Network,
+ * with summary cards (engagement, sleep) on top and device/context cards
+ * trailing at the bottom.
+ *
+ * Cards present in [activeCards] but missing from this list keep their
+ * relative order at the tail.
+ */
+private val WIZARD_DEFAULT_CARD_ORDER: List<String> = listOf(
+    // Summary
+    "engagement",
+    "sleep",
+    // ACTIVITY
+    "activityprofile",
+    "heartrate",
+    // LOCATION
+    "homework",
+    "commute",
+    "location",
+    "dwell",
+    "travel",
+    // AUDIO
+    "voice",
+    // PHONE_USE
+    "apps",
+    "notifstress",
+    "social",
+    "unlock",
+    "privacy",
+    // PEOPLE_AND_SCHEDULE
+    "socialgraph",
+    "calendar",
+    "photo",
+    "commdepth",
+    "spending",
+    // NETWORK_SURROUNDINGS
+    "wifi",
+    "bluetooth",
+    // Behavioral / device / context (trailing)
+    "circadian",
+    "routine",
+    "weekdayweekend",
+    "trends",
+    "compulsion",
+    "fragmentation",
+    "health",
+    "charging",
+    "dataflow",
+    "income",
+    "portfolio",
+    "fingerprint",
+    "entropy",
+    "integrity"
+)
+
+private fun wizardDefaultOrder(cards: List<ActiveInsightCard>): List<String> {
+    val present = cards.map { it.key }.toSet()
+    val ordered = WIZARD_DEFAULT_CARD_ORDER.filter { it in present }
+    val tail = cards.map { it.key }.filter { it !in WIZARD_DEFAULT_CARD_ORDER }
+    return ordered + tail
+}
 
 private fun resolveCardOrder(defaultOrder: List<String>, savedOrder: List<String>): List<String> {
     if (defaultOrder.isEmpty()) return emptyList()
@@ -807,6 +904,62 @@ private fun UnavailableInsightCard(insight: UnavailableInsight) {
 }
 
 // ── Collection header ───────────────────────────────────────────────
+
+@Composable
+private fun FinishSetupCard(
+    lockedCardCount: Int,
+    undecidedStepCount: Int,
+    onResume: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable { onResume() },
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = TerminalBlue.copy(alpha = 0.08f)
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(TerminalBlue.copy(alpha = 0.18f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.LockOpen,
+                    contentDescription = null,
+                    tint = TerminalBlue,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    if (lockedCardCount > 0)
+                        "$lockedCardCount more insights available"
+                    else "Finish setup",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TerminalBlue
+                )
+                Text(
+                    "$undecidedStepCount permission step${if (undecidedStepCount == 1) "" else "s"} left — tap to continue",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(
+                Icons.Default.ExpandMore,
+                contentDescription = null,
+                tint = TerminalBlue.copy(alpha = 0.7f)
+            )
+        }
+    }
+}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -2403,14 +2556,26 @@ private fun DeviceHealthCard(health: DeviceHealth, meta: InsightMeta? = null, sh
         HorizontalDivider(color = DimGray.copy(alpha = 0.3f))
         Spacer(Modifier.height(8.dp))
 
-        // Stats grid
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            StatCell(Icons.Default.Smartphone, if (hasRamData) "${health.processCount}" else "---", "processes")
-            StatCell(Icons.Default.Storage, if (hasRamData) "${health.foregroundCount}" else "---", "foreground")
-            StatCell(Icons.Default.Storage, if (hasRamData) "${health.backgroundCount}" else "---", "background")
+        // Stats grid — only meaningful when system_stats has run (ADB).
+        // Without ADB, runningAppProcesses returns just this app's own
+        // process, so the numbers are misleading. Hide them in that case
+        // and tell the user why.
+        if (health.processCountsTrusted) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                StatCell(Icons.Default.Smartphone, "${health.processCount}", "processes")
+                StatCell(Icons.Default.Storage, "${health.foregroundCount}", "foreground")
+                StatCell(Icons.Default.Storage, "${health.backgroundCount}", "background")
+            }
+        } else {
+            Text(
+                "Process counts require ADB-granted permissions",
+                fontSize = 9.sp,
+                fontFamily = FontFamily.Monospace,
+                color = DimGray
+            )
         }
 
         Spacer(Modifier.height(8.dp))

@@ -3,8 +3,10 @@
     <string name="app_name">MirrorTrack</string>
 
     <string name="fgs_notification_title">MirrorTrack collecting</string>
+    <string name="fgs_notification_title_locked">MirrorTrack locked</string>
     <string name="fgs_notification_text">%1$s total points · %2$s today · %3$d live streams</string>
     <string name="fgs_notification_text_private">Collecting locally. Open MirrorTrack for details.</string>
+    <string name="fgs_notification_text_locked">Open MirrorTrack and unlock to resume collection.</string>
     <string name="fgs_channel_name">Collection status</string>
     <string name="fgs_channel_desc">Ongoing notification for background data collection.</string>
 </resources>

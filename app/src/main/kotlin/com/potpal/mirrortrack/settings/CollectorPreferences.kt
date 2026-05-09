@@ -242,6 +242,35 @@ class CollectorPreferences @Inject constructor(
         }
     }
 
+    // --- Onboarding ---
+
+    /** True once the user has finished or explicitly dismissed onboarding. */
+    fun isOnboardingEntrySeen(): Flow<Boolean> =
+        context.collectorDataStore.data.map { prefs ->
+            prefs[booleanPreferencesKey("onboarding.entry_seen")] ?: false
+        }
+
+    suspend fun isOnboardingEntrySeenSync(): Boolean =
+        context.collectorDataStore.data.first()[booleanPreferencesKey("onboarding.entry_seen")] ?: false
+
+    suspend fun setOnboardingEntrySeen(seen: Boolean) {
+        context.collectorDataStore.edit { prefs ->
+            prefs[booleanPreferencesKey("onboarding.entry_seen")] = seen
+        }
+    }
+
+    /** True if the user has made a Grant/Skip decision for this group. */
+    fun isOnboardingStepDecided(groupId: String): Flow<Boolean> =
+        context.collectorDataStore.data.map { prefs ->
+            prefs[booleanPreferencesKey("onboarding.step.$groupId.decided")] ?: false
+        }
+
+    suspend fun setOnboardingStepDecided(groupId: String, decided: Boolean) {
+        context.collectorDataStore.edit { prefs ->
+            prefs[booleanPreferencesKey("onboarding.step.$groupId.decided")] = decided
+        }
+    }
+
     suspend fun clearAll() {
         context.collectorDataStore.edit { it.clear() }
     }
