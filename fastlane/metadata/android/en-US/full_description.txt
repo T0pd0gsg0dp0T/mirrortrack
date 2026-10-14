@@ -1,0 +1,18 @@
+MirrorTrack turns your Android phone into a private intelligence lab for
+your own life. It captures the same signals that advertisers, brokers, and
+tracker SDKs use to profile you — device identity, app attention, location
+patterns, ambient sensors, sleep clues, notifications, network behavior, and
+local voice context — then translates them into clear insight cards you can
+actually understand.
+
+The difference is ownership: every data point stays on your device in a
+SQLCipher-encrypted vault that only you can unlock. No cloud account, no
+broker pipeline, no hidden upload. Every collector is opt-in and disabled
+by default.
+
+Features:
+* 34 data collectors across 7 categories (device, behavioral, location,
+network, apps, sensors, personal)
+* 37 insight cards plus an anomaly feed with behavioral inference
+* SQLCipher-encrypted local vault, biometric unlock
+* No network exfiltration — your profile never leaves your phone
