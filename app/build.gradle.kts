@@ -24,8 +24,14 @@ android {
         applicationId = "com.potpal.mirrortrack"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "0.1.3"
+        versionCode = 5
+        versionName = "0.1.4"
+
+        // F-Droid: keep native libs consistent across ABIs — package only real
+        // architectures, dropping dead armeabi/mips/mips64 dirs from dep AARs.
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+        }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
